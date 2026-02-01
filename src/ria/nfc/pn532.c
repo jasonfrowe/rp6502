@@ -192,11 +192,11 @@ bool pn532_task(void) {
     pn532_state.init_state = PN532_INIT_RF_CONFIG; // Next step
     break;
 
-  // Set MaxRetry to prevent blocking
+  // Set MaxRetry to infinite so we don't miss tags
   case PN532_INIT_RF_CONFIG: {
-    // MXRTY (Item 5) = 0xFF, 0x01, 0x02 (2 retries for passive)
+    // MXRTY (Item 5) = 0xFF, 0x01, 0xFF (Infinite retries)
     uint8_t buffer[64];
-    uint8_t params[] = {0x05, 0xFF, 0x01, 0x02};
+    uint8_t params[] = {0x05, 0xFF, 0x01, 0xFF};
     size_t len = pn532_build_frame(buffer, PN532_COMMAND_RFCONFIGURATION,
                                    params, sizeof(params));
     ch340_write(pn532_state.dev_addr, buffer, len);
@@ -296,16 +296,15 @@ bool pn532_task(void) {
       }
       pn532_state.init_state = PN532_POLL_COOLDOWN;
       pn532_state.init_timer = now;
-    } else if (now - pn532_state.init_timer > 200) {
-      pn532_state.init_state = PN532_POLL_COOLDOWN;
-      pn532_state.init_timer = now;
     }
+    // NO TIMEOUT: We wait forever for the tag (MaxRetry = 0xFF)
+    // If we timeout here, we desync from the PN532 which is still scanning.
   } break;
 
   case PN532_POLL_COOLDOWN:
-    if (now - pn532_state.init_timer > 100) {
+    if (now - pn532_state.init_timer > 500) { // Wait 500ms before re-arming
       pn532_state.init_state = PN532_POLL_SEND;
-      pn532_state.init_timer = now - 200; // Force immediate trigger
+      pn532_state.init_timer = now;
     }
     break;
   }
