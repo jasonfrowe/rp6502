@@ -269,11 +269,11 @@ static void ch340_bulk_complete_cb(tuh_xfer_t *xfer) {
     ch340_driver.read_complete = true;
     ch340_driver.read_pending = false;
     ch340_driver.xferred_bytes = xfer->actual_len;
-    printf("CH340: Bulk IN complete, len=%lu\n", xfer->actual_len); // Debug!
+    // printf("CH340: Bulk IN complete, len=%lu\n", xfer->actual_len); // Debug!
   } else if (xfer->ep_addr == ch340_driver.ep_out) {
     ch340_driver.write_complete = true;
-    printf("CH340: Bulk OUT complete, len=%lu\n",
-           xfer->actual_len); // Confirm writes!
+    // printf("CH340: Bulk OUT complete, len=%lu\n",
+    //        xfer->actual_len); // Confirm writes!
   }
 }
 

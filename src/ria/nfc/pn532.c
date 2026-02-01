@@ -14,6 +14,7 @@
 #define PN532_COMMAND_GETFIRMWAREVERSION 0x02
 #define PN532_COMMAND_GETFIRMWAREVERSION 0x02
 #define PN532_COMMAND_SAMCONFIGURATION 0x14
+#define PN532_COMMAND_RFCONFIGURATION 0x32
 #define PN532_COMMAND_INLISTPASSIVETARGET 0x4A
 
 // Frame Consurction
@@ -30,6 +31,8 @@ typedef enum {
 
   PN532_INIT_WAIT_ACK,
   PN532_INIT_WAIT_RESPONSE,
+  PN532_INIT_RF_CONFIG,
+  PN532_INIT_RF_WAIT_ACK,
   PN532_INIT_DONE,
   PN532_POLL_SEND,
   PN532_POLL_WAIT_ACK,
@@ -186,8 +189,37 @@ bool pn532_task(void) {
     }
     // TODO: If not found, maybe trigger another read?
     // But our atomic log showed it came in one chunk.
-    pn532_state.init_state = PN532_INIT_DONE; // Just finish for now
+    pn532_state.init_state = PN532_INIT_RF_CONFIG; // Next step
     break;
+
+  // Set MaxRetry to prevent blocking
+  case PN532_INIT_RF_CONFIG: {
+    // MXRTY (Item 5) = 0xFF, 0x01, 0x02 (2 retries for passive)
+    uint8_t buffer[64];
+    uint8_t params[] = {0x05, 0xFF, 0x01, 0x02};
+    size_t len = pn532_build_frame(buffer, PN532_COMMAND_RFCONFIGURATION,
+                                   params, sizeof(params));
+    ch340_write(pn532_state.dev_addr, buffer, len);
+    ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
+               sizeof(pn532_state.rx_buffer));
+    pn532_state.init_state = PN532_INIT_RF_WAIT_ACK;
+    pn532_state.init_timer = now;
+  } break;
+
+  case PN532_INIT_RF_WAIT_ACK: {
+    int bytes = ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
+                           sizeof(pn532_state.rx_buffer));
+    if (bytes > 0) {
+      // We ignore the actual response packet (D5 33) for now for speed
+      // Just assume it worked if we got an ACK/Response
+      pn532_state.init_state = PN532_INIT_DONE;
+      return false;
+    }
+    if ((now - pn532_state.init_timer) > 200) {
+      // Timeout, just proceed
+      pn532_state.init_state = PN532_INIT_DONE;
+    }
+  } break;
 
   case PN532_INIT_DONE:
     // Initialized. Start polling loop.
@@ -195,7 +227,7 @@ bool pn532_task(void) {
     break;
 
   case PN532_POLL_SEND:
-    if ((now - pn532_state.init_timer) > 500) { // Poll every 500ms
+    if ((now - pn532_state.init_timer) > 100) { // Poll every 100ms
       // printf("PN532: Polling for targets...\n");
       uint8_t buffer[64];
       // InListPassiveTarget: MaxTg=1, BrTy=0 (106 kbps type A)
@@ -271,9 +303,9 @@ bool pn532_task(void) {
   } break;
 
   case PN532_POLL_COOLDOWN:
-    if (now - pn532_state.init_timer > 500) {
+    if (now - pn532_state.init_timer > 100) {
       pn532_state.init_state = PN532_POLL_SEND;
-      pn532_state.init_timer = now;
+      pn532_state.init_timer = now - 200; // Force immediate trigger
     }
     break;
   }
