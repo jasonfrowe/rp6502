@@ -309,11 +309,11 @@ X(STR_HELP_SET_RFCC,
 
 X(STR_HELP_SET_SSID, 
   "This is the Service Set Identifier for your WiFi network. Setting \"-\" will\n"
-                     "disable WiFi.\n")
+  "disable WiFi.\n")
 
 X(STR_HELP_SET_PASS,
   "This is the password for your WiFi network. Use \"-\" to clear password.\n")
 
 X(STR_HELP_SET_BLE, 
   "Setting 0 disables Bluetooth LE. Setting 1 enables. Setting 2 enters pairing\n"
-                    "mode which will remain active until successful.\n")
+  "mode which will remain active until successful.\n")
