@@ -5,10 +5,10 @@
  */
 
 #include "nfc/nfc.h"
+#include "fatfs/ff.h"
 #include "mon/mon.h"
 #include "nfc/ch340.h"
 #include "nfc/pn532.h"
-#include "sys/lfs.h"
 #include <pico/stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,16 +27,15 @@ void nfc_init(void) {
 }
 
 static void nfc_check_config(uint8_t *uid, uint8_t uid_len) {
-  lfs_file_t lfs_file;
-  LFS_FILE_CONFIG(lfs_file_config);
+  FIL file;
+  FRESULT fr;
 
   // Config format: UID (Hex) = Command
   // e.g. 04A1B2C3 = LOAD GAME
 
-  int err = lfs_file_opencfg(&lfs_volume, &lfs_file, "NFC.TXT", LFS_O_RDONLY,
-                             &lfs_file_config);
-  if (err < 0) {
-    printf("NFC: No NFC.TXT found.\n");
+  fr = f_open(&file, "NFC.TXT", FA_READ);
+  if (fr != FR_OK) {
+    printf("NFC: No NFC.TXT found (Error %d).\n", fr);
     return;
   }
 
@@ -50,7 +49,7 @@ static void nfc_check_config(uint8_t *uid, uint8_t uid_len) {
   }
 
   bool executed = false;
-  while (lfs_gets(line, sizeof(line), &lfs_volume, &lfs_file)) {
+  while (f_gets(line, sizeof(line), &file)) {
     // Simple parser
     // 1. Skip leading whitespace
     char *ptr = line;
@@ -92,7 +91,7 @@ static void nfc_check_config(uint8_t *uid, uint8_t uid_len) {
     }
   }
 
-  lfs_file_close(&lfs_volume, &lfs_file);
+  f_close(&file);
 
   if (!executed) {
     printf("NFC: Tag %s not found in NFC.TXT\n", uid_str);
