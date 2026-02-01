@@ -26,8 +26,9 @@
 #include "net/mdm.h"
 #include "net/ntp.h"
 #include "net/wfi.h"
-#include "sys/com.h"
+#include "nfc/nfc.h"
 #include "sys/cfg.h"
+#include "sys/com.h"
 #include "sys/cpu.h"
 #include "sys/led.h"
 #include "sys/lfs.h"
@@ -76,6 +77,7 @@ static void init(void)
     rom_init();
     clk_init();
     mdm_init();
+    nfc_init();
 
     // CPU must be last. Triggers a reclock.
     cpu_init();
@@ -102,6 +104,7 @@ void main_task(void)
     led_task();
     mdm_task();
     ram_task();
+    nfc_task();
 }
 
 // Tasks that call FatFs should be here instead of main_task().
