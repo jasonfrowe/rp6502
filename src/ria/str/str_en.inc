@@ -162,7 +162,7 @@ X(STR_HELP_SET,
   "SET PASS (pass|-)   - Set password for WiFi. \"-\" for none.\n"
   "SET BLE (0|1|2)     - Disable or enable Bluetooth LE. 2 enables pairing.\n"
 #endif
-  "")
+  )
 
 X(STR_HELP_SYSTEM,
   "The Picocomputer does not use a traditional parallel ROM like a 27C64 or\n"
@@ -289,7 +289,7 @@ X(STR_HELP_SET_CP,
 #if RP6502_CODE_PAGE
   "This is a development build. Only " STR_RP6502_CODE_PAGE " is available.\n"
 #endif
-  "")
+  )
 
 X(STR_HELP_SET_VGA,
   "SET VGA selects the display type for VGA output. All canvas resolutions are\n"
