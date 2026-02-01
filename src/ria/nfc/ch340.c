@@ -362,9 +362,8 @@ void ch340_mount(uint8_t dev_addr, uint16_t vid, uint16_t pid) {
 void ch340_umount(uint8_t dev_addr) {
   if (dev_addr == ch340_driver.dev_addr) {
     printf("CH340: Device unmounted\n");
-    ch340_driver.state = CH340_STATE_IDLE;
-    ch340_driver.dev_addr = 0;
-    nfc_cdc_unmounted(0);
+    memset(&ch340_driver, 0, sizeof(ch340_driver));
+    nfc_cdc_unmounted(dev_addr);
   }
 }
 
