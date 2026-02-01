@@ -12,7 +12,9 @@
 
 // PN532 Commands
 #define PN532_COMMAND_GETFIRMWAREVERSION 0x02
+#define PN532_COMMAND_GETFIRMWAREVERSION 0x02
 #define PN532_COMMAND_SAMCONFIGURATION 0x14
+#define PN532_COMMAND_INLISTPASSIVETARGET 0x4A
 
 // Frame Consurction
 #define PN532_PREAMBLE 0x00
@@ -25,11 +27,14 @@
 typedef enum {
   PN532_INIT_IDLE = 0,
   PN532_INIT_WAKEUP,
-  PN532_INIT_SEND_ACK,
-  PN532_INIT_SENDING_FW_REQ,
+
   PN532_INIT_WAIT_ACK,
   PN532_INIT_WAIT_RESPONSE,
-  PN532_INIT_DONE
+  PN532_INIT_DONE,
+  PN532_POLL_SEND,
+  PN532_POLL_WAIT_ACK,
+  PN532_POLL_WAIT_RESPONSE,
+  PN532_POLL_COOLDOWN
 } pn532_init_state_t;
 
 static struct {
@@ -38,6 +43,9 @@ static struct {
   uint32_t init_timer;
   uint8_t tx_buffer[64];
   uint8_t rx_buffer[64];
+  uint8_t last_uid[10];
+  uint8_t last_uid_len;
+  bool new_tag;
 } pn532_state = {0};
 
 static uint8_t pn532_calc_dcs(const uint8_t *data, size_t len) {
@@ -69,6 +77,15 @@ static size_t pn532_build_frame(uint8_t *buffer, uint8_t cmd,
   buffer[pos++] = dcs;
   buffer[pos++] = PN532_POSTAMBLE;
   return pos;
+}
+
+bool pn532_read_tag(uint8_t *uid, uint8_t *len) {
+  if (!pn532_state.new_tag)
+    return false;
+  *len = pn532_state.last_uid_len;
+  memcpy(uid, pn532_state.last_uid, *len);
+  pn532_state.new_tag = false;
+  return true;
 }
 
 bool pn532_init(uint8_t dev_addr) {
@@ -173,6 +190,91 @@ bool pn532_task(void) {
     break;
 
   case PN532_INIT_DONE:
+    // Initialized. Start polling loop.
+    pn532_state.init_state = PN532_POLL_SEND;
+    break;
+
+  case PN532_POLL_SEND:
+    if ((now - pn532_state.init_timer) > 500) { // Poll every 500ms
+      // printf("PN532: Polling for targets...\n");
+      uint8_t buffer[64];
+      // InListPassiveTarget: MaxTg=1, BrTy=0 (106 kbps type A)
+      uint8_t params[] = {0x01, 0x00};
+      size_t len = pn532_build_frame(buffer, PN532_COMMAND_INLISTPASSIVETARGET,
+                                     params, sizeof(params));
+
+      ch340_write(pn532_state.dev_addr, buffer, len);
+
+      // Prepare to read ACK
+      ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
+                 sizeof(pn532_state.rx_buffer));
+
+      pn532_state.init_state = PN532_POLL_WAIT_ACK;
+      pn532_state.init_timer = now;
+    }
+    break;
+
+  case PN532_POLL_WAIT_ACK: {
+    int bytes = ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
+                           sizeof(pn532_state.rx_buffer));
+    if (bytes > 0) {
+      // Trigger read for actual response
+      ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
+                 sizeof(pn532_state.rx_buffer));
+      pn532_state.init_state = PN532_POLL_WAIT_RESPONSE;
+      pn532_state.init_timer = now;
+    } else if (now - pn532_state.init_timer > 100) {
+      // Timeout, try again later
+      pn532_state.init_state = PN532_POLL_COOLDOWN;
+      pn532_state.init_timer = now;
+    }
+  } break;
+
+  case PN532_POLL_WAIT_RESPONSE: {
+    int bytes = ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
+                           sizeof(pn532_state.rx_buffer));
+    if (bytes > 0) {
+      // Parse Response: D5 4B [NbTg] [Tg1]...
+      uint8_t *buf = pn532_state.rx_buffer;
+      // Scan for response code D5 4B
+      for (int i = 0; i < 32; i++) {
+        if (buf[i] == 0xD5 && buf[i + 1] == 0x4B) {
+          uint8_t nb_tg = buf[i + 2];
+          if (nb_tg > 0) {
+            // Target Found!
+            // Tg1 starts at buf[i+3]
+            // [Tg#] [SENS_RES(2)] [SEL_RES(1)] [NFCIDLength(1)] [NFCID(N)]
+            uint8_t uid_len = buf[i + 7];
+            uint8_t *uid = &buf[i + 8];
+
+            printf("PN532: Tag Found! UID Length: %d, UID: ", uid_len);
+            for (int j = 0; j < uid_len; j++)
+              printf("%02X ", uid[j]);
+            printf("\n");
+
+            // Store tag data
+            if (uid_len <= sizeof(pn532_state.last_uid)) {
+              memcpy(pn532_state.last_uid, uid, uid_len);
+              pn532_state.last_uid_len = uid_len;
+              pn532_state.new_tag = true;
+            }
+          }
+          break;
+        }
+      }
+      pn532_state.init_state = PN532_POLL_COOLDOWN;
+      pn532_state.init_timer = now;
+    } else if (now - pn532_state.init_timer > 200) {
+      pn532_state.init_state = PN532_POLL_COOLDOWN;
+      pn532_state.init_timer = now;
+    }
+  } break;
+
+  case PN532_POLL_COOLDOWN:
+    if (now - pn532_state.init_timer > 500) {
+      pn532_state.init_state = PN532_POLL_SEND;
+      pn532_state.init_timer = now;
+    }
     break;
   }
   return false;

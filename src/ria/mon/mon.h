@@ -41,4 +41,7 @@ void mon_add_response_fatfs(int fresult);
 // acceptable names when installing ROMs.
 bool mon_command_exists(const char *buf, size_t buflen);
 
+// Run a command as if typed at the prompt
+void mon_run_command(const char *cmd);
+
 #endif /* _RIA_MON_MON_H_ */

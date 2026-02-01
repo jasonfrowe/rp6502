@@ -33,6 +33,30 @@ The NFC reader is automatically detected at plug-in.
 *   **Status:** Use the `status` command in the monitor to see connected devices (e.g., "1 NFC reader").
 *   **Integration:** The driver hooks into `usb.c` and is managed by the RIA task scheduler.
 
+## Configuration (`NFC.TXT`)
+To map NFC tags to commands, create a file named `NFC.TXT` in the root of the USB drive or SD card (littlefs).
+
+**Format:**
+```text
+UID_HEX = COMMAND
+```
+
+**Example:**
+```text
+# Launch Elite when this tag is scanned
+04A1B2C3 = LOAD ELITE
+
+# List files for this tag
+12345678 = LS
+
+# Comments start with #
+```
+
+**Finding UIDs:**
+If a tag is scanned but not found in `NFC.TXT`, the RIA will print the UID to the USB console:
+`NFC: Tag 04A1B2C3 not found in NFC.TXT`
+You can copy this UID into your config file.
+
 ## Future Work
-- Implement `InListPassiveTarget` to read UID from tags.
-- Map NFC Tags to keyboard macros or file loading events.
+- Map NFC Tags to keyboard macros or file loading events. (Partially Implemented via mon_run_command)
+
