@@ -157,8 +157,7 @@ X(STR_HELP_SET,
   "SET VGA (0|1|2)     - Query or set display type for VGA output.\n"
 #ifdef RP6502_RIA_W
   "SET RF (0|1)        - Disable or enable radio.\n"
-  "SET RFCC (cc|-)     - Set country code for RF devices. \"-\" for "
-  "worldwide.\n"
+  "SET RFCC (cc|-)     - Set country code for RF devices. \"-\" for worldwide.\n"
   "SET SSID (ssid|-)   - Set SSID for WiFi. \"-\" for none.\n"
   "SET PASS (pass|-)   - Set password for WiFi. \"-\" for none.\n"
   "SET BLE (0|1|2)     - Disable or enable Bluetooth LE. 2 enables pairing.\n"
@@ -167,19 +166,13 @@ X(STR_HELP_SET,
 
 X(STR_HELP_SYSTEM,
   "The Picocomputer does not use a traditional parallel ROM like a 27C64 or\n"
-  "similar. Instead, this monitor is used to prepare the 6502 RAM with "
-  "software\n"
+  "similar. Instead, this monitor is used to prepare the 6502 RAM with software\n"
   "that would normally be on a ROM chip. The 6502 is currently in-reset right\n"
-  "now; the RESB line is low. What you are seeing is coming from the "
-  "RP6502-RIA.\n"
-  "You can return to this monitor at any time by pressing CTRL-ALT-DEL or "
-  "sending\n"
-  "a break to the serial port. Since these signals are handled by the "
-  "RP6502-RIA,\n"
-  "they will always stop the 6502, even when crashed. This monitor can do "
-  "scripted\n"
-  "things that are useful for developing software. It also provides "
-  "interactive\n"
+  "now; the RESB line is low. What you are seeing is coming from the RP6502-RIA.\n"
+  "You can return to this monitor at any time by pressing CTRL-ALT-DEL or sending\n"
+  "a break to the serial port. Since these signals are handled by the RP6502-RIA,\n"
+  "they will always stop the 6502, even when crashed. This monitor can do scripted\n"
+  "things that are useful for developing software. It also provides interactive\n"
   "commands like typing a hex address to see the corresponding RAM value:\n"
   "]0200\n"
   "0200  DA DA DA DA DA DA DA DA  DA DA DA DA DA DA DA DA  |................|\n"
@@ -190,8 +183,7 @@ X(STR_HELP_SYSTEM,
   "]FFFC 00 02\n"
   "Intel HEX format is allowed:\n"
   "]:02FFFC00000201\n"
-  "Manually manipulating memory is useful for some light debugging, but the "
-  "real\n"
+  "Manually manipulating memory is useful for some light debugging, but the real\n"
   "power is from the other commands you can explore with this help system.\n"
   "Have fun!\n")
 
@@ -200,8 +192,8 @@ X(STR_HELP_DIR,
   "devices. You can change to a different USB device with 0: to 7:. Use the\n"
   "STATUS command to get a list of mounted drives.\n")
 
-X(STR_HELP_MKDIR, "MKDIR is used to create new directories. Use UNLINK to "
-                  "remove empty directories.\n")
+X(STR_HELP_MKDIR, 
+  "MKDIR is used to create new directories. Use UNLINK to remove empty directories.\n")
 
 X(STR_HELP_LOAD,
   "LOAD and INFO read ROM files from a USB drive. A ROM file contains both\n"
@@ -214,35 +206,27 @@ X(STR_HELP_LOAD,
   "hex or decimal numbers indicating the address, length, and CRC-32.\n"
   "$C000 1024 0x0C0FFEE0\n"
   "This is followed by the binary data. The maximum length is 1024 bytes, so\n"
-  "repeat as necessary. The CRC-32 is calculated using the same method as "
-  "zip.\n"
+  "repeat as necessary. The CRC-32 is calculated using the same method as zip.\n"
   "If the ROM file contains data for the reset vector $FFFC-$FFFD then the\n"
   "6502 will be reset (started) immediately after loading.\n")
 
 X(STR_HELP_INSTALL,
-  "INSTALL and REMOVE manage the ROMs installed in the RP6502 RIA flash "
-  "memory.\n"
+  "INSTALL and REMOVE manage the ROMs installed in the RP6502 RIA flash memory.\n"
   "ROM files must contain a reset vector to be installed. A list of installed\n"
-  "ROMs is shown on the base HELP screen. Once installed, these ROMs become "
-  "an\n"
-  "integrated part of the system and can be loaded manually by simply using "
-  "their\n"
+  "ROMs is shown on the base HELP screen. Once installed, these ROMs become an\n"
+  "integrated part of the system and can be loaded manually by simply using their\n"
   "name like any other command. The ROM name must not conflict with any other\n"
-  "system command, must start with a letter, and may only contain up to 16 "
-  "ASCII\n"
-  "letters and numbers. If the file contains an extension, it must be "
-  "\".rp6502\",\n"
+  "system command, must start with a letter, and may only contain up to 16 ASCII\n"
+  "letters and numbers. If the file contains an extension, it must be \".rp6502\",\n"
   "which will be stripped upon install.\n")
 
 X(STR_HELP_REBOOT,
   "REBOOT will restart the RP6502-RIA. It does the same thing as pressing a\n"
-  "reboot button attached to the RIA RUN pin or interrupting the power "
-  "supply.\n")
+  "reboot button attached to the RIA RUN pin or interrupting the power supply.\n")
 
 X(STR_HELP_RESET,
   "RESET will start the 6502 by bringing RESB high. This monitor will be\n"
-  "suspended until the 6502 stops with a UART break, CTRL-ALT-DEL, or "
-  "exit().\n")
+  "suspended until the 6502 stops with a UART break, CTRL-ALT-DEL, or exit().\n")
 
 X(STR_HELP_UPLOAD,
   "UPLOAD is used to send a file from another system to the local filesystem.\n"
@@ -251,17 +235,14 @@ X(STR_HELP_UPLOAD,
   "files containing graphics or level data for a game. Then you can LOAD the\n"
   "game and test it. The upload is initiated with a filename.\n"
   "]UPLOAD filename.bin\n"
-  "The system will respond with a \"}\" prompt or an error message starting "
-  "with\n"
+  "The system will respond with a \"}\" prompt or an error message starting with\n"
   "a \"?\". Any error will abort the upload and return you to the monitor.\n"
   "There is no retry as this is not intended to be used on lossy connections.\n"
-  "Specify each chunk with a length, up to 1024 bytes, and CRC-32 which you "
-  "can\n"
+  "Specify each chunk with a length, up to 1024 bytes, and CRC-32 which you can\n"
   "compute from any zip library.\n"
   "}$400 $0C0FFEE0\n"
   "Send the binary data and you will get another \"}\" prompt or \"?\" error.\n"
-  "The transfer is completed with the END command or a blank line. Your "
-  "choice.\n"
+  "The transfer is completed with the END command or a blank line. Your choice.\n"
   "}END\n"
   "You will return to a \"]\" prompt on success or \"?\" error on failure.\n")
 
@@ -271,10 +252,8 @@ X(STR_HELP_UNLINK,
   "as part of automated testing.\n")
 
 X(STR_HELP_BINARY,
-  "BINARY is the fastest way to get code or data from your build system to "
-  "the\n"
-  "6502 RAM. Use the command \"BINARY addr len crc\" with a maximum length of "
-  "1024\n"
+  "BINARY is the fastest way to get code or data from your build system to the\n"
+  "6502 RAM. Use the command \"BINARY addr len crc\" with a maximum length of 1024\n"
   "bytes and the CRC-32 calculated with a zip library. Then send the binary.\n"
   "You will return to a \"]\" prompt on success or \"?\" error on failure.\n")
 
@@ -282,19 +261,14 @@ X(STR_HELP_STATUS,
   "STATUS will show the status of all hardware in and connected to the RIA.\n")
 
 X(STR_HELP_SET_PHI2,
-  "PHI2 is the 6502 clock speed in kHz. The valid range is " STR_PHI2_MIN_MAX
-  " but not all\n"
+  "PHI2 is the 6502 clock speed in kHz. The valid range is " STR_PHI2_MIN_MAX " but not all\n"
   "frequencies are available. In that case, the next highest frequency will\n"
-  "be automatically calculated and selected. Setting is saved on the RIA "
-  "flash.\n")
+  "be automatically calculated and selected. Setting is saved on the RIA flash.\n")
 
 X(STR_HELP_SET_BOOT,
-  "BOOT selects an installed ROM to be automatically loaded and started when "
-  "the\n"
-  "system is powered up or rebooted. For example, you might want the system "
-  "to\n"
-  "immediately boot into BASIC or an operating system CLI. Using \"-\" for "
-  "the\n"
+  "BOOT selects an installed ROM to be automatically loaded and started when the\n"
+  "system is powered up or rebooted. For example, you might want the system to\n"
+  "immediately boot into BASIC or an operating system CLI. Using \"-\" for the\n"
   "argument will have the system boot into the monitor you are using now.\n"
   "Setting is saved on the RIA flash.\n")
 
@@ -305,44 +279,41 @@ X(STR_HELP_SET_TZ,
   "example, \"SET TZ PST8PDT,M3.2.0/2,M11.1.0/2\". The easiest way to get a\n"
   "POSIX TZ string is to ask an AI \"posix tz for {your location}\".\n")
 
-X(STR_HELP_SET_KB, "SET KB selects a keyboard layout. e.g. SET KB US\n")
+X(STR_HELP_SET_KB, 
+  "SET KB selects a keyboard layout. e.g. SET KB US\n")
 
 X(STR_HELP_SET_CP,
-  "SET CP selects a code page for system text. The following is supported: "
-  "437\n"
+  "SET CP selects a code page for system text. The following is supported: 437\n"
   "737, 771, 775, 850, 852, 855, 857, 860, 861, 862, 863, 864, 865, 866, 869.\n"
-  "Code pages 720, 932, 936, 949, 950 are available but do not have VGA "
-  "fonts.\n"
+  "Code pages 720, 932, 936, 949, 950 are available but do not have VGA fonts.\n"
 #if RP6502_CODE_PAGE
   "This is a development build. Only " STR_RP6502_CODE_PAGE " is available.\n"
 #endif
   "")
 
 X(STR_HELP_SET_VGA,
-  "SET VGA selects the display type for VGA output. All canvas resolutions "
-  "are\n"
+  "SET VGA selects the display type for VGA output. All canvas resolutions are\n"
   "supported by all display types. Display type is used to maintain square\n"
-  "pixels and minimize letterboxing. Note that 1280x1024 is 5:4 so 4:3 "
-  "graphics\n"
+  "pixels and minimize letterboxing. Note that 1280x1024 is 5:4 so 4:3 graphics\n"
   "will be letterboxed slightly but you'll get 2 extra rows on the terminal.\n"
   "  0 - 640x480, for 4:3 displays\n"
   "  1 - 640x480 and 1280x720, for 16:9 displays\n"
   "  2 - 1280x1024, for 5:4 SXGA displays\n")
 
-X(STR_HELP_SET_RF, "SET RF (0|1) turns all radios off or on.\n")
+X(STR_HELP_SET_RF,
+   "SET RF (0|1) turns all radios off or on.\n")
 
 X(STR_HELP_SET_RFCC,
   "Set this so the CYW43 can use the best radio frequencies for your country.\n"
-  "Using \"-\" will clear the country code and default to a worldwide "
-  "setting.\n")
+  "Using \"-\" will clear the country code and default to a worldwide setting.\n")
 
-X(STR_HELP_SET_SSID, "This is the Service Set Identifier for your WiFi "
-                     "network. Setting \"-\" will\n"
+X(STR_HELP_SET_SSID, 
+  "This is the Service Set Identifier for your WiFi network. Setting \"-\" will\n"
                      "disable WiFi.\n")
 
 X(STR_HELP_SET_PASS,
   "This is the password for your WiFi network. Use \"-\" to clear password.\n")
 
-X(STR_HELP_SET_BLE, "Setting 0 disables Bluetooth LE. Setting 1 enables. "
-                    "Setting 2 enters pairing\n"
+X(STR_HELP_SET_BLE, 
+  "Setting 0 disables Bluetooth LE. Setting 1 enables. Setting 2 enters pairing\n"
                     "mode which will remain active until successful.\n")
