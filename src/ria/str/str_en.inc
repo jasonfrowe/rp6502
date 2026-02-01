@@ -110,14 +110,14 @@ X(STR_BLE_NO_RF, ", no RF")
 // Device names
 X(STR_KEYBOARD_SINGULAR, "keyboard")
 X(STR_KEYBOARD_PLURAL, "keyboards")
+X(STR_NFC_SINGULAR, " NFC reader")
+X(STR_NFC_PLURAL, " NFC readers")
 X(STR_MOUSE_SINGULAR, "mouse")
 X(STR_MOUSE_PLURAL, "mice")
 X(STR_GAMEPAD_SINGULAR, "gamepad")
 X(STR_GAMEPAD_PLURAL, "gamepads")
 X(STR_STORAGE_SINGULAR, "storage")
 X(STR_STORAGE_PLURAL, "storage")
-X(STR_NFC_SINGULAR, "NFC reader")
-X(STR_NFC_PLURAL, "NFC readers")
 
 // Installed ROM list
 X(STR_ROM_INSTALLED_NONE, "No installed ROMs.\n")

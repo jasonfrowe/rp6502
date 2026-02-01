@@ -38,7 +38,7 @@ X(STR_STATUS_NTP, "NTP : %s\n")
 X(STR_STATUS_TIME, "Time: %s\n")
 X(STR_STATUS_BLE_FULL, "BLE : %d %s, %d %s, %d %s%s\n")
 X(STR_STATUS_BLE_SIMPLE, "BLE : %s\n")
-X(STR_STATUS_USB, "USB : %d %s, %d %s, %d %s, %d %s, %d %s\n")
+X(STR_STATUS_USB, "USB : %d %s, %d %s, %d %s, %d %s\n")
 X(STR_STATUS_MSC, "%s: %.1f %s %.8s %.16s rev %.4s\n")
 
 // ANSI to reset the terminal at boot
@@ -142,4 +142,5 @@ X(STR_HELP_ABOUT,
   "                                            Computer Science.\n"
 #endif
   "")
-X(STR_HELP_ABOUT_VIP, "             VIPs - ")
+X(STR_HELP_ABOUT_VIP,
+  "             VIPs - ")
