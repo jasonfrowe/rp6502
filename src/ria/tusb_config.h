@@ -37,8 +37,9 @@
 // Enabled, usb/msc driver defines quantity of 8
 #define CFG_TUH_MSC (1)
 // No vendor driver
+// Vendor driver disabled to allow manual handling of CH340
 #define CFG_TUH_VENDOR (0)
-
+#define CFG_TUH_API_EDPT_XFER (1)
 // 8 drives and 8 input devices
 #define CFG_TUH_DEVICE_MAX (16)
 
