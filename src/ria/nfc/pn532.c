@@ -45,7 +45,8 @@ static struct {
   pn532_init_state_t init_state;
   uint32_t init_timer;
   uint8_t tx_buffer[64];
-  uint8_t rx_buffer[64];
+  uint8_t rx_buffer[128]; // Increased size for safety
+  size_t rx_idx;          // Accumulator index
   uint8_t last_uid[10];
   uint8_t last_uid_len;
   bool new_tag;
@@ -237,7 +238,11 @@ bool pn532_task(void) {
 
       ch340_write(pn532_state.dev_addr, buffer, len);
 
-      // Prepare to read ACK
+      // Reset accumulator
+      pn532_state.rx_idx = 0;
+      memset(pn532_state.rx_buffer, 0, sizeof(pn532_state.rx_buffer));
+
+      // Prepare to read ACK (into start of buffer)
       ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
                  sizeof(pn532_state.rx_buffer));
 
@@ -247,58 +252,95 @@ bool pn532_task(void) {
     break;
 
   case PN532_POLL_WAIT_ACK: {
-    int bytes = ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
-                           sizeof(pn532_state.rx_buffer));
+    // Check if we got ANY data (assuming it's ACK or start of it)
+    int bytes = ch340_read(pn532_state.dev_addr,
+                           &pn532_state.rx_buffer[pn532_state.rx_idx],
+                           sizeof(pn532_state.rx_buffer) - pn532_state.rx_idx);
     if (bytes > 0) {
-      // Trigger read for actual response
-      ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
-                 sizeof(pn532_state.rx_buffer));
+      pn532_state.rx_idx += bytes;
+      // We assume if we got data, we can move to waiting for response
+      // (Or checking if we have enough data to scan)
+      // Since MaxRetry=Infinite, we won't get empty packets easily.
       pn532_state.init_state = PN532_POLL_WAIT_RESPONSE;
       pn532_state.init_timer = now;
     } else if (now - pn532_state.init_timer > 100) {
-      // Timeout, try again later
+      // Timeout waiting for ACK? Reset.
       pn532_state.init_state = PN532_POLL_COOLDOWN;
       pn532_state.init_timer = now;
     }
   } break;
 
   case PN532_POLL_WAIT_RESPONSE: {
-    int bytes = ch340_read(pn532_state.dev_addr, pn532_state.rx_buffer,
-                           sizeof(pn532_state.rx_buffer));
-    if (bytes > 0) {
-      // Parse Response: D5 4B [NbTg] [Tg1]...
-      uint8_t *buf = pn532_state.rx_buffer;
-      // Scan for response code D5 4B
-      for (int i = 0; i < 32; i++) {
+    // Keep reading into accumulator
+    if (pn532_state.rx_idx < sizeof(pn532_state.rx_buffer)) {
+      int bytes = ch340_read(
+          pn532_state.dev_addr, &pn532_state.rx_buffer[pn532_state.rx_idx],
+          sizeof(pn532_state.rx_buffer) - pn532_state.rx_idx);
+      if (bytes > 0) {
+        pn532_state.rx_idx += bytes;
+        pn532_state.init_timer = now; // Refresh timeout on new data
+      }
+    }
+
+    // Scan for response code D5 4B (InListPassiveTarget Response)
+    uint8_t *buf = pn532_state.rx_buffer;
+    // Ensure we have enough data to even check (at least 2 bytes)
+    if (pn532_state.rx_idx >= 2) {
+      for (size_t i = 0; i < pn532_state.rx_idx - 1; i++) {
         if (buf[i] == 0xD5 && buf[i + 1] == 0x4B) {
-          uint8_t nb_tg = buf[i + 2];
-          if (nb_tg > 0) {
-            // Target Found!
-            // Tg1 starts at buf[i+3]
-            // [Tg#] [SENS_RES(2)] [SEL_RES(1)] [NFCIDLength(1)] [NFCID(N)]
-            uint8_t uid_len = buf[i + 7];
-            uint8_t *uid = &buf[i + 8];
+          // Found Header! Check if we have the rest...
+          // Need [NbTg]...
+          if (i + 2 < pn532_state.rx_idx) {
+            uint8_t nb_tg = buf[i + 2];
+            if (nb_tg > 0) {
+              // Target Found!
+              // Tg1 starts at buf[i+3]
+              // [Tg#] [SENS_RES(2)] [SEL_RES(1)] [NFCIDLength(1)] [NFCID(N)]
+              // Need up to NFCIDLength.
+              // Min length check: i+8 (header)
+              if (i + 8 < pn532_state.rx_idx) {
+                uint8_t uid_len = buf[i + 7];
+                if (i + 8 + uid_len <= pn532_state.rx_idx) {
+                  uint8_t *uid = &buf[i + 8];
 
-            printf("PN532: Tag Found! UID Length: %d, UID: ", uid_len);
-            for (int j = 0; j < uid_len; j++)
-              printf("%02X ", uid[j]);
-            printf("\n");
+                  printf("PN532: Tag Found! UID Length: %d, UID: ", uid_len);
+                  for (int j = 0; j < uid_len; j++)
+                    printf("%02X ", uid[j]);
+                  printf("\n");
 
-            // Store tag data
-            if (uid_len <= sizeof(pn532_state.last_uid)) {
-              memcpy(pn532_state.last_uid, uid, uid_len);
-              pn532_state.last_uid_len = uid_len;
-              pn532_state.new_tag = true;
+                  // Store tag data
+                  if (uid_len <= sizeof(pn532_state.last_uid)) {
+                    memcpy(pn532_state.last_uid, uid, uid_len);
+                    pn532_state.last_uid_len = uid_len;
+                    pn532_state.new_tag = true;
+                  }
+
+                  // reset
+                  pn532_state.init_state = PN532_POLL_COOLDOWN;
+                  pn532_state.init_timer = now;
+                  return false;
+                }
+              }
+            } else {
+              // 0 Targets. Still valid response.
+              // Just cooldown.
+              pn532_state.init_state = PN532_POLL_COOLDOWN;
+              pn532_state.init_timer = now;
+              return false;
             }
           }
-          break;
         }
       }
+    }
+
+    // Timeout logic:
+    // If we have data (rx_idx > 0) but didn't find a complete valid frame
+    // within 200ms, assume garbage and reset.
+    // If rx_idx == 0, we wait FOREVER (Infinite Polling).
+    if (pn532_state.rx_idx > 0 && (now - pn532_state.init_timer > 200)) {
       pn532_state.init_state = PN532_POLL_COOLDOWN;
       pn532_state.init_timer = now;
     }
-    // NO TIMEOUT: We wait forever for the tag (MaxRetry = 0xFF)
-    // If we timeout here, we desync from the PN532 which is still scanning.
   } break;
 
   case PN532_POLL_COOLDOWN:
