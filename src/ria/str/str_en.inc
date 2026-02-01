@@ -162,7 +162,7 @@ X(STR_HELP_SET,
   "SET PASS (pass|-)   - Set password for WiFi. \"-\" for none.\n"
   "SET BLE (0|1|2)     - Disable or enable Bluetooth LE. 2 enables pairing.\n"
 #endif
-  )
+  "")
 
 X(STR_HELP_SYSTEM,
   "The Picocomputer does not use a traditional parallel ROM like a 27C64 or\n"
@@ -192,7 +192,7 @@ X(STR_HELP_DIR,
   "devices. You can change to a different USB device with 0: to 7:. Use the\n"
   "STATUS command to get a list of mounted drives.\n")
 
-X(STR_HELP_MKDIR, 
+X(STR_HELP_MKDIR,
   "MKDIR is used to create new directories. Use UNLINK to remove empty directories.\n")
 
 X(STR_HELP_LOAD,
@@ -279,7 +279,7 @@ X(STR_HELP_SET_TZ,
   "example, \"SET TZ PST8PDT,M3.2.0/2,M11.1.0/2\". The easiest way to get a\n"
   "POSIX TZ string is to ask an AI \"posix tz for {your location}\".\n")
 
-X(STR_HELP_SET_KB, 
+X(STR_HELP_SET_KB,
   "SET KB selects a keyboard layout. e.g. SET KB US\n")
 
 X(STR_HELP_SET_CP,
@@ -289,7 +289,7 @@ X(STR_HELP_SET_CP,
 #if RP6502_CODE_PAGE
   "This is a development build. Only " STR_RP6502_CODE_PAGE " is available.\n"
 #endif
-  )
+  "")
 
 X(STR_HELP_SET_VGA,
   "SET VGA selects the display type for VGA output. All canvas resolutions are\n"
@@ -301,19 +301,19 @@ X(STR_HELP_SET_VGA,
   "  2 - 1280x1024, for 5:4 SXGA displays\n")
 
 X(STR_HELP_SET_RF,
-   "SET RF (0|1) turns all radios off or on.\n")
+  "SET RF (0|1) turns all radios off or on.\n")
 
 X(STR_HELP_SET_RFCC,
   "Set this so the CYW43 can use the best radio frequencies for your country.\n"
   "Using \"-\" will clear the country code and default to a worldwide setting.\n")
 
-X(STR_HELP_SET_SSID, 
+X(STR_HELP_SET_SSID,
   "This is the Service Set Identifier for your WiFi network. Setting \"-\" will\n"
   "disable WiFi.\n")
 
 X(STR_HELP_SET_PASS,
   "This is the password for your WiFi network. Use \"-\" to clear password.\n")
 
-X(STR_HELP_SET_BLE, 
+X(STR_HELP_SET_BLE,
   "Setting 0 disables Bluetooth LE. Setting 1 enables. Setting 2 enters pairing\n"
   "mode which will remain active until successful.\n")
