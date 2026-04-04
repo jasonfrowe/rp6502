@@ -295,6 +295,8 @@ bool main_api(uint8_t operation)
         return dir_api_getlabel();
     case 0x2E:
         return dir_api_getfree();
+    case 0x2F:
+        return std_api_read_xram_split();
     }
     return api_return_errno(API_ENOSYS);
 }

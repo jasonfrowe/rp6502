@@ -73,6 +73,10 @@ static uint16_t std_size;
 static uint16_t std_pos;
 static int32_t std_pix;
 
+// Extra state used only by std_api_read_xram_split.
+static char *std_split_buf2; // overlay XRAM destination (hi nibble)
+static int32_t std_pix2;     // PIX countdown for overlay region (-1 = inactive)
+
 // Readline state for stdin.
 static bool std_rln_active;
 static const char *std_rln_buf;
@@ -316,6 +320,116 @@ bool std_api_read_xram(void)
     std_buf = (char *)&xram[xram_addr];
     std_fd = fd;
     std_pos = 0;
+    return api_working();
+}
+
+// ---------------------------------------------------------------------------
+// read_xram_split — opcode 0x2F
+//
+// Reads `count` bytes from fildes and splits each byte into two XRAM regions:
+//   xram[base_dst + i] = byte & 0x0F   (base layer,    lo nibble)
+//   xram[ov_dst   + i] = byte & 0xF0   (overlay layer, hi nibble)
+//
+// This lets the Pico (at 125 MHz) do the nibble split that V3C requires,
+// avoiding 32,768 slow RIA register accesses on the 65C02 side.
+//
+// Stack on entry (LIFO order — top = last pushed):
+//   [top]    count    uint16  bytes to read from file
+//   [mid]    ov_dst   uint16  XRAM address for overlay tiles
+//   [bottom] base_dst uint16  XRAM address for base tiles
+//   A register: fildes
+//
+// Returns: bytes consumed from the file (= count on success), or -1 + errno.
+// ---------------------------------------------------------------------------
+bool std_api_read_xram_split(void)
+{
+    if (std_fd)
+    {
+        // ----- PIX broadcast phase -----------------------------------------
+        // First drain std_pix (base region), then std_pix2 (overlay region).
+        if (std_pix >= 0)
+        {
+            uint16_t xram_addr = (uint16_t)(std_buf - (char *)xram);
+            for (; std_pix > 0 && pix_ready(); --std_pix, ++xram_addr, ++std_buf)
+                pix_send(PIX_DEVICE_XRAM, 0, xram[xram_addr], xram_addr);
+            if (std_pix > 0)
+                return api_working();
+            // Base region broadcast done; switch to overlay region.
+            std_pix = -1;
+            std_buf = std_split_buf2;
+            std_pix2 = std_pos;
+        }
+        if (std_pix2 >= 0)
+        {
+            uint16_t xram_addr = (uint16_t)(std_buf - (char *)xram);
+            for (; std_pix2 > 0 && pix_ready(); --std_pix2, ++xram_addr, ++std_buf)
+                pix_send(PIX_DEVICE_XRAM, 0, xram[xram_addr], xram_addr);
+            if (std_pix2 > 0)
+                return api_working();
+            // Both regions broadcast. Done.
+            std_pix2 = -1;
+            std_fd = NULL;
+            return api_return_ax(std_pos);
+        }
+
+        // ----- File read + split phase -------------------------------------
+        // Read in <=256-byte chunks to avoid needing an 8 KB temp buffer.
+        // The split is done immediately as each chunk arrives.
+        uint8_t tmp[256];
+        uint32_t to_read = std_size - std_pos;
+        if (to_read > sizeof(tmp))
+            to_read = sizeof(tmp);
+        uint32_t bytes_read;
+        api_errno err = API_EIO;
+        std_rw_result result = std_fd->read(std_fd->desc,
+                                            (char *)tmp, to_read,
+                                            &bytes_read, &err);
+        // Split each byte into the two XRAM destinations.
+        uint16_t base_off = (uint16_t)(std_split_buf2 - (char *)xram); // save ov start
+        (void)base_off;
+        char *base_p = std_buf + std_pos; // base XRAM ptr at current offset
+        char *ov_p   = std_split_buf2 + std_pos;
+        for (uint32_t i = 0; i < bytes_read; i++)
+        {
+            base_p[i] = tmp[i] & 0x0F;
+            ov_p[i]   = tmp[i] & 0xF0;
+        }
+        std_pos += bytes_read;
+        if (result == STD_PENDING)
+            return api_working();
+        if (result == STD_ERROR)
+        {
+            std_pix2 = -1;
+            std_fd = NULL;
+            return api_return_errno(err);
+        }
+        // File read complete. Kick off PIX broadcast for base region.
+        std_pix = std_pos;
+        return api_working();
+    }
+
+    // ----- First call: parse arguments and set up state -------------------
+    uint16_t base_addr, ov_addr;
+    if (!api_pop_uint16(&std_size) ||
+        !api_pop_uint16(&ov_addr) ||
+        !api_pop_uint16_end(&base_addr))
+        return api_return_errno(API_EINVAL);
+    std_fd_t *fd = std_validate_fd(API_A);
+    if (!fd)
+        return api_return_errno(API_EBADF);
+    if (!fd->read)
+        return api_return_errno(API_ENOSYS);
+    if (std_size > 0x7FFF)
+        std_size = 0x7FFF;
+    if ((uint32_t)base_addr + std_size > 0x10000 ||
+        (uint32_t)ov_addr   + std_size > 0x10000)
+        return api_return_errno(API_EINVAL);
+    std_buf       = (char *)&xram[base_addr];
+    std_split_buf2 = (char *)&xram[ov_addr];
+    std_fd  = fd;
+    std_pos = 0;
+    std_pix = -1;
+    std_pix2 = -1;
     return api_working();
 }
 

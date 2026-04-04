@@ -27,6 +27,7 @@ bool std_api_open(void);
 bool std_api_close(void);
 bool std_api_read_xstack(void);
 bool std_api_read_xram(void);
+bool std_api_read_xram_split(void);
 bool std_api_write_xstack(void);
 bool std_api_write_xram(void);
 bool std_api_syncfs(void);
