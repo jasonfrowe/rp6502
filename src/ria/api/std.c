@@ -373,27 +373,15 @@ bool std_api_read_xram_split(void)
         }
 
         // ----- File read + split phase -------------------------------------
-        // Read in <=256-byte chunks to avoid needing an 8 KB temp buffer.
-        // The split is done immediately as each chunk arrives.
-        uint8_t tmp[256];
-        uint32_t to_read = std_size - std_pos;
-        if (to_read > sizeof(tmp))
-            to_read = sizeof(tmp);
+        // Read directly into the base XRAM slot. The driver handles chunking
+        // internally (returning STD_PENDING) so we do not need a temp buffer.
+        // Only when all std_size bytes have arrived (STD_OK) do we split.
         uint32_t bytes_read;
         api_errno err = API_EIO;
         std_rw_result result = std_fd->read(std_fd->desc,
-                                            (char *)tmp, to_read,
+                                            std_buf + std_pos,
+                                            std_size - std_pos,
                                             &bytes_read, &err);
-        // Split each byte into the two XRAM destinations.
-        uint16_t base_off = (uint16_t)(std_split_buf2 - (char *)xram); // save ov start
-        (void)base_off;
-        char *base_p = std_buf + std_pos; // base XRAM ptr at current offset
-        char *ov_p   = std_split_buf2 + std_pos;
-        for (uint32_t i = 0; i < bytes_read; i++)
-        {
-            base_p[i] = tmp[i] & 0x0F;
-            ov_p[i]   = tmp[i] & 0xF0;
-        }
         std_pos += bytes_read;
         if (result == STD_PENDING)
             return api_working();
@@ -403,7 +391,16 @@ bool std_api_read_xram_split(void)
             std_fd = NULL;
             return api_return_errno(err);
         }
-        // File read complete. Kick off PIX broadcast for base region.
+        // All std_size bytes are now in the base XRAM slot.
+        // Split in-place at 125 MHz: lo nibble stays in base, hi nibble goes
+        // to the overlay slot.
+        for (uint16_t i = 0; i < (uint16_t)std_pos; i++)
+        {
+            uint8_t b = (uint8_t)std_buf[i];
+            std_buf[i]        = b & 0x0F;
+            std_split_buf2[i] = b & 0xF0;
+        }
+        // Kick off PIX broadcast for base region.
         std_pix = std_pos;
         return api_working();
     }
