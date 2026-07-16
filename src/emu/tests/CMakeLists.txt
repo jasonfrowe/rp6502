@@ -170,3 +170,15 @@ target_include_directories(test_mister_transport PRIVATE
     ${RP6502_SRC}
     ${RP6502_SRC}/emu/host/mister)
 add_test(NAME mister_transport COMMAND test_mister_transport)
+
+# --- MiSTer wrapper control-loop flow (cmd/ack, heartbeat, launch/stop/reset) ---
+if(TARGET rp6502-mister-wrapper)
+    add_executable(test_mister_wrapper_flow test_mister_wrapper_flow.c)
+    target_include_directories(test_mister_wrapper_flow PRIVATE
+        ${UTEST_DIR}
+        ${RP6502_SRC}
+        ${RP6502_SRC}/emu/host/mister)
+    target_compile_definitions(test_mister_wrapper_flow PRIVATE
+        MISTER_WRAPPER_BIN="$<TARGET_FILE:rp6502-mister-wrapper>")
+    add_test(NAME mister_wrapper_flow COMMAND test_mister_wrapper_flow)
+endif()
