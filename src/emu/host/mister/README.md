@@ -30,6 +30,15 @@ From repo root:
 
 `src/emu/host/mister/build_wrapper_arm.sh`
 
+Build wrapper + control helper together:
+
+`src/emu/host/mister/build_tools_arm.sh`
+
+By default ARM helper scripts link statically for better MiSTer compatibility.
+Override link flags if needed:
+
+`LDFLAGS_STATIC='' src/emu/host/mister/build_tools_arm.sh`
+
 Override compiler path if needed:
 
 `CC=/path/to/arm-none-linux-gnueabihf-gcc src/emu/host/mister/build_wrapper_arm.sh`
@@ -65,6 +74,26 @@ Launch via payload path/arg slots:
 One-shot launch/stop smoke sequence:
 
 `build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin --runtime /bin/sleep --runtime-arg 2 smoke`
+
+## MiSTer SSH Smoke
+
+Build ARM tools locally:
+
+`src/emu/host/mister/build_tools_arm.sh`
+
+Copy both binaries to MiSTer:
+
+`scp build/mister-tools-arm/rp6502-mister-wrapper mister:/media/fat/rp6502-mister-wrapper`
+
+`scp build/mister-tools-arm/rp6502-mister-ctl mister:/media/fat/rp6502-mister-ctl`
+
+Start wrapper on MiSTer (file transport scaffold):
+
+`ssh mister '/media/fat/rp6502-mister-wrapper --transport file --reg-file /tmp/rp6502_arm_if.bin --poll-ms 1'`
+
+From another shell run smoke sequence:
+
+`ssh mister '/media/fat/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin --runtime /bin/sleep --runtime-arg 2 smoke'`
 
 Stop/reset/clear:
 
