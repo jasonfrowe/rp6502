@@ -395,6 +395,11 @@ if(NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN AND NOT ANDROID)
         ${RP6502_SRC}/emu/host/mister/wrapper_main.c
         ${RP6502_SRC}/emu/host/mister/transport.c)
     target_include_directories(rp6502-mister-wrapper PRIVATE ${RP6502_SRC}/emu/host/mister)
+
+    add_executable(rp6502-mister-ctl
+        ${RP6502_SRC}/emu/host/mister/mister_ctl.c
+        ${RP6502_SRC}/emu/host/mister/transport.c)
+    target_include_directories(rp6502-mister-ctl PRIVATE ${RP6502_SRC}/emu/host/mister)
 endif()
 
 # Tests

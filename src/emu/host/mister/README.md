@@ -20,6 +20,10 @@ From `src/emu`:
 
 `cmake --build --preset debug --target rp6502-mister-wrapper`
 
+Control helper:
+
+`cmake --build --preset debug --target rp6502-mister-ctl`
+
 ### ARM cross-build (MiSTer Linux)
 
 From repo root:
@@ -43,6 +47,24 @@ File-backed (default):
 Devmem-backed (integration path):
 
 `build/emulator/debug/rp6502-mister-wrapper --transport devmem --devmem /dev/mem --hps-base 0x<addr> --runtime /bin/sleep --runtime-arg 60`
+
+## Control Helper
+
+Print current register state:
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin status`
+
+Launch via payload path/arg slots:
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin --runtime /bin/sleep --runtime-arg 5 launch`
+
+Stop/reset/clear:
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin stop`
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin reset`
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin clear-error`
 
 ## Notes
 
