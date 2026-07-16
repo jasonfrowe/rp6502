@@ -393,3 +393,11 @@ if(RP6502_EMU_BUILD_TESTS AND NOT EMSCRIPTEN AND NOT ANDROID)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# M1 scaffold: Linux/BSD ARM-side wrapper process that drives the v1 control/status
+# handshake contract. This is intentionally separate from rp6502-emu runtime.
+if(NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN AND NOT ANDROID)
+    add_executable(rp6502-mister-wrapper
+        ${RP6502_SRC}/emu/host/mister/wrapper_main.c)
+    target_include_directories(rp6502-mister-wrapper PRIVATE ${RP6502_SRC}/emu/host/mister)
+endif()
