@@ -160,3 +160,13 @@ target_compile_definitions(test_gamepad PRIVATE
     GAMEPAD_ROM="${ROMS}/gamepad.rp6502")
 add_test(NAME gamepad COMMAND test_gamepad)
 set_tests_properties(gamepad PROPERTIES TIMEOUT 60)
+
+# --- MiSTer ARM IF transport smoke (file-backed mmap register bank) ---
+add_executable(test_mister_transport
+    test_mister_transport.c
+    ${RP6502_SRC}/emu/host/mister/transport.c)
+target_include_directories(test_mister_transport PRIVATE
+    ${UTEST_DIR}
+    ${RP6502_SRC}
+    ${RP6502_SRC}/emu/host/mister)
+add_test(NAME mister_transport COMMAND test_mister_transport)
