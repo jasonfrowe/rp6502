@@ -12,6 +12,16 @@ From `src/emu`:
 
 `cmake --build --preset debug --target rp6502-mister-wrapper`
 
+### ARM cross-build (MiSTer Linux)
+
+From repo root:
+
+`src/emu/host/mister/build_wrapper_arm.sh`
+
+Override compiler path if needed:
+
+`CC=/path/to/arm-none-linux-gnueabihf-gcc src/emu/host/mister/build_wrapper_arm.sh`
+
 ## Run
 
 `build/emulator/debug/rp6502-mister-wrapper --runtime /bin/sleep --runtime-arg 60`
