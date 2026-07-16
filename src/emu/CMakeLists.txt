@@ -398,6 +398,7 @@ endif()
 # handshake contract. This is intentionally separate from rp6502-emu runtime.
 if(NOT WIN32 AND NOT APPLE AND NOT EMSCRIPTEN AND NOT ANDROID)
     add_executable(rp6502-mister-wrapper
-        ${RP6502_SRC}/emu/host/mister/wrapper_main.c)
+        ${RP6502_SRC}/emu/host/mister/wrapper_main.c
+        ${RP6502_SRC}/emu/host/mister/transport.c)
     target_include_directories(rp6502-mister-wrapper PRIVATE ${RP6502_SRC}/emu/host/mister)
 endif()

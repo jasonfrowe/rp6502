@@ -25,6 +25,7 @@ echo "Building ARM wrapper with: $CC"
     -Werror=implicit-function-declaration \
     -I"$SRC_DIR" \
     "$SRC_DIR/wrapper_main.c" \
+    "$SRC_DIR/transport.c" \
     -o "$OUT_BIN"
 
 echo "Built: $OUT_BIN"

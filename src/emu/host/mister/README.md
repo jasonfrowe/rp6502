@@ -6,6 +6,11 @@ It maps a small register window from a file (default `/tmp/rp6502_arm_if.bin`),
 updates heartbeat/status fields, and responds to launch/stop requests using
 `CMD_SEQ`/`ACK_SEQ` semantics from `src/fpga/RP6502_MISTER_ARM_INTERFACE_V1.md`.
 
+Architecture note:
+- `wrapper_main.c` is orchestration and state machine.
+- `transport.c` is the transport backend layer (file-backed M1 and `/dev/mem` path).
+- This mirrors the 3s-mister-arm split between control wrapper logic and hardware-facing path.
+
 ## Build
 
 From `src/emu`:
@@ -25,6 +30,16 @@ Override compiler path if needed:
 ## Run
 
 `build/emulator/debug/rp6502-mister-wrapper --runtime /bin/sleep --runtime-arg 60`
+
+### Transport selection
+
+File-backed (default):
+
+`build/emulator/debug/rp6502-mister-wrapper --transport file --reg-file /tmp/rp6502_arm_if.bin --runtime /bin/sleep --runtime-arg 60`
+
+Devmem-backed (integration path):
+
+`build/emulator/debug/rp6502-mister-wrapper --transport devmem --devmem /dev/mem --hps-base 0x<addr> --runtime /bin/sleep --runtime-arg 60`
 
 ## Notes
 
