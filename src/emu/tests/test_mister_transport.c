@@ -7,6 +7,7 @@
 #include "utest.h"
 
 #include "arm_if_v1.h"
+#include "arm_payload_v1.h"
 #include "transport.h"
 
 #include <fcntl.h>
@@ -37,13 +38,15 @@ UTEST(mister_transport, file_backed_rw)
     rp6502_arm_if_write(tp.regs, RP6502_ARM_IF_OFF_MAGIC, RP6502_ARM_IF_MAGIC);
     rp6502_arm_if_write(tp.regs, RP6502_ARM_IF_OFF_VERSION, RP6502_ARM_IF_VERSION);
     rp6502_arm_if_write(tp.regs, RP6502_ARM_IF_OFF_CMD_SEQ, 7u);
+    strcpy((char *)tp.map_base + RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_PATH, "/bin/sleep");
 
     ASSERT_EQ(rp6502_arm_if_read(tp.regs, RP6502_ARM_IF_OFF_MAGIC), RP6502_ARM_IF_MAGIC);
     ASSERT_EQ(rp6502_arm_if_read(tp.regs, RP6502_ARM_IF_OFF_VERSION), RP6502_ARM_IF_VERSION);
     ASSERT_EQ(rp6502_arm_if_read(tp.regs, RP6502_ARM_IF_OFF_CMD_SEQ), 7u);
+    ASSERT_STREQ((const char *)tp.map_base + RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_PATH, "/bin/sleep");
 
     ASSERT_EQ(fstat(tp.fd, &st), 0);
-    ASSERT_EQ((uint32_t)st.st_size, (uint32_t)RP6502_ARM_IF_REG_SIZE);
+    ASSERT_EQ((uint32_t)st.st_size, (uint32_t)RP6502_ARM_IF_WINDOW_SIZE);
 
     mister_transport_close(&tp);
     ASSERT_EQ(unlink(path), 0);

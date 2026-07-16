@@ -6,6 +6,9 @@ It maps a small register window from a file (default `/tmp/rp6502_arm_if.bin`),
 updates heartbeat/status fields, and responds to launch/stop requests using
 `CMD_SEQ`/`ACK_SEQ` semantics from `src/fpga/RP6502_MISTER_ARM_INTERFACE_V1.md`.
 
+Runtime launch payload slots are documented in
+`src/fpga/RP6502_MISTER_ASSET_RUNTIME_PROTOCOL_V1.md`.
+
 Architecture note:
 - `wrapper_main.c` is orchestration and state machine.
 - `transport.c` is the transport backend layer (file-backed M1 and `/dev/mem` path).
@@ -46,3 +49,6 @@ Devmem-backed (integration path):
 - This is a scaffold only; it does not map real MiSTer HPS registers yet.
 - M2/M3 will replace the file-backed register map with the real transport.
 - Current intent is integration bring-up for launch/stop/error flows.
+- Runtime source precedence:
+	- `--runtime` CLI path (if provided) overrides payload launch path.
+	- Otherwise wrapper reads `RUNTIME_PATH` / `RUNTIME_ARG` from the shared payload window.

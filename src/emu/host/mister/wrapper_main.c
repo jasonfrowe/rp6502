@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <signal.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +11,7 @@
 #include <unistd.h>
 
 #include "arm_if_v1.h"
+#include "arm_payload_v1.h"
 #include "transport.h"
 
 typedef struct {
@@ -102,6 +104,37 @@ static volatile uint32_t *wrapper_regs(wrapper_state_t *st) {
     return st->transport.regs;
 }
 
+static int payload_read_string(const wrapper_state_t *st,
+                               uint32_t off,
+                               uint32_t max_len,
+                               char *out,
+                               size_t out_size,
+                               int allow_empty) {
+    const char *base = (const char *)st->transport.map_base;
+    uint32_t i;
+
+    if(!base || st->transport.map_size < off + max_len || out_size < (size_t)max_len + 1) {
+        return -1;
+    }
+
+    for(i = 0; i < max_len; i++) {
+        char c = base[off + i];
+        if(c == '\0') {
+            if(i == 0 && !allow_empty) {
+                return -1;
+            }
+            out[i] = '\0';
+            return 0;
+        }
+        if((unsigned char)c < 0x20 || (unsigned char)c > 0x7e) {
+            return -1;
+        }
+        out[i] = c;
+    }
+
+    return -1;
+}
+
 static void runtime_reap_if_exited(wrapper_state_t *st) {
     int status;
     pid_t r;
@@ -120,8 +153,37 @@ static void runtime_reap_if_exited(wrapper_state_t *st) {
 
 static int runtime_start(wrapper_state_t *st, const wrapper_config_t *cfg) {
     pid_t pid;
+    const char *runtime_path = cfg->runtime_path;
+    const char *runtime_arg = cfg->runtime_arg;
+    char payload_runtime_path[RP6502_ARM_PAYLOAD_V1_MAX_RUNTIME_PATH + 1];
+    char payload_runtime_arg[RP6502_ARM_PAYLOAD_V1_MAX_RUNTIME_ARG + 1];
 
-    if(!cfg->runtime_path || cfg->runtime_path[0] == '\0') {
+    if(!runtime_path || runtime_path[0] == '\0') {
+        if(payload_read_string(st,
+                               RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_PATH,
+                               RP6502_ARM_PAYLOAD_V1_MAX_RUNTIME_PATH,
+                               payload_runtime_path,
+                               sizeof(payload_runtime_path),
+                               0) != 0) {
+            rp6502_arm_if_write(wrapper_regs(st), RP6502_ARM_IF_OFF_LAST_ERROR, RP6502_ARM_ERR_BAD_PAYLOAD_PATH);
+            return -1;
+        }
+
+        runtime_path = payload_runtime_path;
+        if(payload_read_string(st,
+                               RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_ARG,
+                               RP6502_ARM_PAYLOAD_V1_MAX_RUNTIME_ARG,
+                               payload_runtime_arg,
+                               sizeof(payload_runtime_arg),
+                               1) == 0 &&
+           payload_runtime_arg[0] != '\0') {
+            runtime_arg = payload_runtime_arg;
+        } else {
+            runtime_arg = NULL;
+        }
+    }
+
+    if(runtime_path[0] != '/') {
         rp6502_arm_if_write(wrapper_regs(st), RP6502_ARM_IF_OFF_LAST_ERROR, RP6502_ARM_ERR_BAD_PAYLOAD_PATH);
         return -1;
     }
@@ -134,10 +196,10 @@ static int runtime_start(wrapper_state_t *st, const wrapper_config_t *cfg) {
     }
 
     if(pid == 0) {
-        if(cfg->runtime_arg) {
-            execl(cfg->runtime_path, cfg->runtime_path, cfg->runtime_arg, (char *)NULL);
+        if(runtime_arg) {
+            execl(runtime_path, runtime_path, runtime_arg, (char *)NULL);
         } else {
-            execl(cfg->runtime_path, cfg->runtime_path, (char *)NULL);
+            execl(runtime_path, runtime_path, (char *)NULL);
         }
         _exit(127);
     }

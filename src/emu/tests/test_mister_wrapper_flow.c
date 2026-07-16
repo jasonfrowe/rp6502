@@ -7,6 +7,7 @@
 #include "utest.h"
 
 #include "arm_if_v1.h"
+#include "arm_payload_v1.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -80,10 +81,6 @@ UTEST(mister_wrapper, launch_stop_reset_flow)
               "file",
               "--reg-file",
               path,
-              "--runtime",
-              "/bin/sleep",
-              "--runtime-arg",
-              "5",
               "--poll-ms",
               "1",
               (char *)NULL);
@@ -97,6 +94,9 @@ UTEST(mister_wrapper, launch_stop_reset_flow)
                                 RP6502_ARM_STATUS_PRESENT | RP6502_ARM_STATUS_READY,
                                 RP6502_ARM_STATUS_PRESENT | RP6502_ARM_STATUS_READY,
                                 500));
+
+    strcpy((char *)regs + RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_PATH, "/bin/sleep");
+    strcpy((char *)regs + RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_ARG, "5");
 
     hb0 = rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_HEARTBEAT);
     usleep(8000);

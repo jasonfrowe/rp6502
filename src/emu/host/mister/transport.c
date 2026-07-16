@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "arm_if_v1.h"
+#include "arm_payload_v1.h"
 #include "transport.h"
 
 static int open_file_transport(const mister_transport_config_t *cfg, mister_transport_t *tp) {
@@ -22,14 +23,14 @@ static int open_file_transport(const mister_transport_config_t *cfg, mister_tran
         return -1;
     }
 
-    if(ftruncate(tp->fd, RP6502_ARM_IF_REG_SIZE) != 0) {
+    if(ftruncate(tp->fd, RP6502_ARM_IF_WINDOW_SIZE) != 0) {
         perror("ftruncate reg-file");
         close(tp->fd);
         tp->fd = -1;
         return -1;
     }
 
-    map = mmap(NULL, RP6502_ARM_IF_REG_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, tp->fd, 0);
+    map = mmap(NULL, RP6502_ARM_IF_WINDOW_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, tp->fd, 0);
     if(map == MAP_FAILED) {
         perror("mmap reg-file");
         close(tp->fd);
@@ -38,7 +39,7 @@ static int open_file_transport(const mister_transport_config_t *cfg, mister_tran
     }
 
     tp->map_base = map;
-    tp->map_size = RP6502_ARM_IF_REG_SIZE;
+    tp->map_size = RP6502_ARM_IF_WINDOW_SIZE;
     tp->regs = (volatile uint32_t *)map;
     return 0;
 }
@@ -47,7 +48,7 @@ static int open_devmem_transport(const mister_transport_config_t *cfg, mister_tr
     const uint32_t page = (uint32_t)sysconf(_SC_PAGESIZE);
     const uint64_t base_page = cfg->hps_base & ~((uint64_t)page - 1u);
     const uint32_t page_off = (uint32_t)(cfg->hps_base - base_page);
-    const uint32_t map_size = page_off + RP6502_ARM_IF_REG_SIZE;
+    const uint32_t map_size = page_off + RP6502_ARM_IF_WINDOW_SIZE;
     void *map;
 
     tp->fd = open(cfg->devmem_path, O_RDWR | O_SYNC);
