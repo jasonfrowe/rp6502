@@ -54,9 +54,17 @@ Print current register state:
 
 `build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin status`
 
+Wait until wrapper advertises ready state:
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin --timeout-ms 3000 wait-ready`
+
 Launch via payload path/arg slots:
 
 `build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin --runtime /bin/sleep --runtime-arg 5 launch`
+
+One-shot launch/stop smoke sequence:
+
+`build/emulator/debug/rp6502-mister-ctl --transport file --reg-file /tmp/rp6502_arm_if.bin --runtime /bin/sleep --runtime-arg 2 smoke`
 
 Stop/reset/clear:
 

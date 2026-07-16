@@ -20,7 +20,7 @@ typedef struct {
 
 static void usage(const char *argv0) {
     fprintf(stderr,
-            "Usage: %s [--transport file|devmem] [--reg-file <path>] [--devmem <path>] [--hps-base <hex>] [--runtime <path>] [--runtime-arg <arg>] [--timeout-ms <n>] <status|launch|stop|reset|clear-error>\n",
+            "Usage: %s [--transport file|devmem] [--reg-file <path>] [--devmem <path>] [--hps-base <hex>] [--runtime <path>] [--runtime-arg <arg>] [--timeout-ms <n>] <status|wait-ready|launch|stop|reset|clear-error|smoke>\n",
             argv0);
 }
 
@@ -128,20 +128,131 @@ static int wait_for_ack(volatile uint32_t *regs, uint32_t seq, unsigned timeout_
     return -1;
 }
 
+static int wait_for_status_mask(volatile uint32_t *regs,
+                                uint32_t mask,
+                                uint32_t expected,
+                                unsigned timeout_ms) {
+    unsigned i;
+    for(i = 0; i < timeout_ms; i++) {
+        if((rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_STATUS) & mask) == expected) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+static int wait_for_ready(volatile uint32_t *regs, unsigned timeout_ms) {
+    unsigned i;
+    for(i = 0; i < timeout_ms; i++) {
+        uint32_t magic = rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_MAGIC);
+        uint32_t version = rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_VERSION);
+        uint32_t status = rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_STATUS);
+        uint32_t ready_mask = RP6502_ARM_STATUS_PRESENT | RP6502_ARM_STATUS_READY;
+
+        if(magic == RP6502_ARM_IF_MAGIC &&
+           version == RP6502_ARM_IF_VERSION &&
+           (status & ready_mask) == ready_mask) {
+            return 0;
+        }
+        usleep(1000);
+    }
+    return -1;
+}
+
+static void print_regs(volatile uint32_t *regs) {
+    printf("magic=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_MAGIC));
+    printf("version=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_VERSION));
+    printf("ctrl=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_CTRL));
+    printf("status=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_STATUS));
+    printf("heartbeat=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_HEARTBEAT));
+    printf("last_error=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_LAST_ERROR));
+    printf("cmd_seq=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_CMD_SEQ));
+    printf("ack_seq=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_ACK_SEQ));
+}
+
+static int send_control_command(volatile uint32_t *regs,
+                                uint32_t ctrl,
+                                unsigned timeout_ms,
+                                uint32_t *ack_seq_out) {
+    uint32_t cmd_seq = rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_CMD_SEQ) + 1u;
+    rp6502_arm_if_write(regs, RP6502_ARM_IF_OFF_CTRL, ctrl);
+    rp6502_arm_if_write(regs, RP6502_ARM_IF_OFF_CMD_SEQ, cmd_seq);
+
+    if(wait_for_ack(regs, cmd_seq, timeout_ms) != 0) {
+        return -1;
+    }
+    if(ack_seq_out) {
+        *ack_seq_out = cmd_seq;
+    }
+    return 0;
+}
+
 static int run_command(mister_transport_t *tp, const ctl_config_t *cfg) {
     volatile uint32_t *regs = tp->regs;
-    uint32_t cmd_seq;
+    uint32_t ack_seq;
     uint32_t ctrl;
 
     if(strcmp(cfg->cmd, "status") == 0) {
-        printf("magic=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_MAGIC));
-        printf("version=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_VERSION));
-        printf("ctrl=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_CTRL));
-        printf("status=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_STATUS));
-        printf("heartbeat=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_HEARTBEAT));
-        printf("last_error=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_LAST_ERROR));
-        printf("cmd_seq=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_CMD_SEQ));
-        printf("ack_seq=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_ACK_SEQ));
+        print_regs(regs);
+        return 0;
+    }
+
+    if(strcmp(cfg->cmd, "wait-ready") == 0) {
+        if(wait_for_ready(regs, cfg->timeout_ms) != 0) {
+            fprintf(stderr, "error: timeout waiting for ARM interface ready\n");
+            return -1;
+        }
+        print_regs(regs);
+        return 0;
+    }
+
+    if(strcmp(cfg->cmd, "smoke") == 0) {
+        if(wait_for_ready(regs, cfg->timeout_ms) != 0) {
+            fprintf(stderr, "error: timeout waiting for ARM interface ready\n");
+            return -1;
+        }
+
+        if(write_payload_string(tp,
+                                RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_PATH,
+                                RP6502_ARM_PAYLOAD_V1_MAX_RUNTIME_PATH,
+                                cfg->runtime_path,
+                                0) != 0) {
+            fprintf(stderr, "error: smoke requires valid --runtime payload string\n");
+            return -1;
+        }
+        if(write_payload_string(tp,
+                                RP6502_ARM_PAYLOAD_V1_OFF_RUNTIME_ARG,
+                                RP6502_ARM_PAYLOAD_V1_MAX_RUNTIME_ARG,
+                                cfg->runtime_arg,
+                                1) != 0) {
+            fprintf(stderr, "error: invalid --runtime-arg payload string\n");
+            return -1;
+        }
+
+        if(send_control_command(regs, RP6502_ARM_CTRL_REQ_LAUNCH, cfg->timeout_ms, &ack_seq) != 0) {
+            fprintf(stderr, "error: timeout waiting for launch ack\n");
+            return -1;
+        }
+        if(wait_for_status_mask(regs,
+                                RP6502_ARM_STATUS_RUNNING,
+                                RP6502_ARM_STATUS_RUNNING,
+                                cfg->timeout_ms) != 0) {
+            fprintf(stderr, "error: launch acknowledged but runtime did not enter running state\n");
+            return -1;
+        }
+        printf("launch_ack_seq=%u\n", ack_seq);
+
+        if(send_control_command(regs, RP6502_ARM_CTRL_REQ_STOP, cfg->timeout_ms, &ack_seq) != 0) {
+            fprintf(stderr, "error: timeout waiting for stop ack\n");
+            return -1;
+        }
+        if(wait_for_status_mask(regs, RP6502_ARM_STATUS_RUNNING, 0, cfg->timeout_ms) != 0) {
+            fprintf(stderr, "error: stop acknowledged but runtime still running\n");
+            return -1;
+        }
+        printf("stop_ack_seq=%u\n", ack_seq);
+        print_regs(regs);
         return 0;
     }
 
@@ -174,16 +285,12 @@ static int run_command(mister_transport_t *tp, const ctl_config_t *cfg) {
         return -1;
     }
 
-    cmd_seq = rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_CMD_SEQ) + 1u;
-    rp6502_arm_if_write(regs, RP6502_ARM_IF_OFF_CTRL, ctrl);
-    rp6502_arm_if_write(regs, RP6502_ARM_IF_OFF_CMD_SEQ, cmd_seq);
-
-    if(wait_for_ack(regs, cmd_seq, cfg->timeout_ms) != 0) {
-        fprintf(stderr, "error: timeout waiting for ack_seq=%u\n", cmd_seq);
+    if(send_control_command(regs, ctrl, cfg->timeout_ms, &ack_seq) != 0) {
+        fprintf(stderr, "error: timeout waiting for ack\n");
         return -1;
     }
 
-    printf("ack_seq=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_ACK_SEQ));
+    printf("ack_seq=%u\n", ack_seq);
     printf("status=0x%08x\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_STATUS));
     printf("last_error=%u\n", rp6502_arm_if_read(regs, RP6502_ARM_IF_OFF_LAST_ERROR));
     return 0;
