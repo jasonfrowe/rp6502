@@ -207,6 +207,12 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             o->rom = argv[i];
             break;
         }
+#if defined(MISTER)
+    if (!o->rom)
+    {
+        o->rom = "/media/fat/games/RP6502/LodeRunner.rp6502";
+    }
+#endif
     return 0;
 }
 

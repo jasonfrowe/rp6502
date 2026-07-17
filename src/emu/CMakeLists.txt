@@ -201,6 +201,10 @@ if(EMU_HAS_WINDOW)
     endif()
 endif()
 
+if(MISTER)
+    set(EMU_HAS_AUDIO ON)
+endif()
+
 # Build source list with window and audio options
 set(APP_SOURCES ${RP6502_SRC}/emu/app/main.c ${RP6502_SRC}/emu/app/cli.c ${RP6502_SRC}/emu/app/window.c ${RP6502_SRC}/emu/app/input.c ${RP6502_SRC}/emu/app/png.c ${RP6502_SRC}/emu/app/web_exports.c)
 if(EMU_HAS_WINDOW)
@@ -219,6 +223,16 @@ else()
     target_link_libraries(rp6502-emu PRIVATE emu_core)
 endif()
 target_include_directories(rp6502-emu PRIVATE ${RP6502_VENDOR}/sokol)
+
+option(MISTER "Build for MiSTerFPGA" OFF)
+if(MISTER)
+    target_compile_definitions(rp6502-emu PRIVATE MISTER EMU_WITH_AUDIO)
+    target_compile_definitions(emu_core PRIVATE MISTER)
+    target_include_directories(rp6502-emu PRIVATE /home/rowe/Software/FPGA/rp6502/build-mister/alsa-lib-install/include)
+    target_link_libraries(rp6502-emu PRIVATE /home/rowe/Software/FPGA/rp6502/build-mister/alsa-lib-install/lib/libasound.a)
+    target_compile_options(rp6502-emu PRIVATE -march=armv7-a -mcpu=cortex-a9 -mfloat-abi=hard -mfpu=neon)
+    target_compile_options(emu_core PRIVATE -march=armv7-a -mcpu=cortex-a9 -mfloat-abi=hard -mfpu=neon)
+endif()
 
 # Windows is only platform without getopt
 if(WIN32)

@@ -18,6 +18,7 @@
 #include "emu/sys/vga.h"
 #include "emu/sys/via.h"
 #include "emu/sys/xreg.h"
+#include "emu/plat.h"
 #include "emu/chips/rp6502.h"
 /* Firmware handler decls, ria/-qualified: a bare "api/std.h" or "aud/aud.h" from
  * this root file would bind to the emu/api/ and emu/aud/ shadows beside it, not
@@ -46,6 +47,9 @@ static unsigned long s_frame_count;
 
 /* Absolute, never reset per frame — feeds the exact deadline math below. */
 static uint64_t scanline_n;
+
+uint64_t g_vga_time_ns = 0;
+uint64_t g_cpu_time_ns = 0;
 
 int main_exit_code(void) { return s_exit_code; }
 void main_set_exit_code(int code) { s_exit_code = code; }
@@ -161,9 +165,19 @@ static void run_frame(bool render)
          * write only affects later lines (real per-scanline VGA behavior). A
          * catch-up frame (render == false) skips the pixels but keeps the timing. */
         if (render && line < canvas_h)
+        {
+            uint64_t v0 = os_mono_ns();
             vga_render_scanline(line);
+            uint64_t v1 = os_mono_ns();
+            g_vga_time_ns += (v1 - v0);
+        }
 
-        if (run_until(scanline_deadline_8(scanline_n + 1), dbg))
+        uint64_t c0 = os_mono_ns();
+        bool held = run_until(scanline_deadline_8(scanline_n + 1), dbg);
+        uint64_t c1 = os_mono_ns();
+        g_cpu_time_ns += (c1 - c0);
+
+        if (held)
             return; /* held at a breakpoint mid-frame; resume re-runs the frame */
         std_task(); /* drain read_xram's PIX gate before the op re-polls */
         api_task(); /* poll in-flight I/O each scanline (RIA super-loop analog) */

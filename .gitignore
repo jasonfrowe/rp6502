@@ -8,3 +8,33 @@ src/emu/android/local.properties
 src/emu/android/*.keystore
 src/emu/android/*.jks
 src/emu/android/release/
+
+# Libraries and build directories
+*.a
+*.so
+build-mister/
+build-deps/
+
+# Quartus build artifacts
+**/db/
+**/incremental_db/
+**/output_files/
+**/hps_islands/
+*.rpt
+*.summary
+*.sof
+*.rbf
+*.qws
+*.pin
+*.jdi
+*.done
+*.fit
+*.flow
+*.map
+*.asm
+*.sld
+*.smsg
+*.ipinfo
+*.sopcinfo
+*.qip
+*.sip

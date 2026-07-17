@@ -20,7 +20,696 @@
 
 #ifndef EMU_WITH_SOKOL
 
+#if defined(MISTER)
+
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/stat.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <linux/input.h>
+#include "emu/hid/kbd.h"
+#include "emu/hid/pad.h"
+
+#if defined(EMU_WITH_AUDIO)
+#include "sokol_audio.h"
+#include "emu/app/audio_out.h"
+#endif
+
+// DDR3 structures and base address
+#define NV_DDR_PHYS_BASE    0x3A000000u
+#define NV_DDR_REGION_SIZE  0x00060000u  // 384KB
+#define NV_CTRL_OFFSET      0x00000000u
+#define NV_FEEDBACK_OFFSET  0x00000040u
+#define NV_BUF0_OFFSET      0x00000100u
+#define NV_BUF1_OFFSET      0x0002A200u
+#define NV_FRAME_BYTES      (384 * 224 * 2)  // 172,032
+
+static int mem_fd = -1;
+static volatile uint8_t* ddr_base = NULL;
+static uint32_t frame_counter = 0;
+static int active_buf = 0;
+static uint16_t local_fb[384 * 224];
+
+extern uint64_t g_vga_time_ns;
+extern uint64_t g_cpu_time_ns;
+
+// Mister shared memory joystick structure
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t joy_mask[2];
+    int8_t   left_stick_x[2];
+    int8_t   left_stick_y[2];
+    int8_t   right_stick_x[2];
+    int8_t   right_stick_y[2];
+} MisterJoyShm;
+
+static MisterJoyShm *mister_shm = NULL;
+static int joy_fd = -1;
+
+#define MAX_KEYBOARDS 8
+static int keyboard_fds[MAX_KEYBOARDS];
+static int num_keyboards = 0;
+
+static bool s_shift = false;
+static bool s_ctrl = false;
+static bool s_alt = false;
+
+static bool is_keyboard(int fd, const char *path)
+{
+    uint8_t key_bits[KEY_MAX/8 + 1];
+    memset(key_bits, 0, sizeof(key_bits));
+    int rc = ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits);
+    if (rc < 0) {
+        printf("  %s: ioctl EV_KEY failed: %d\n", path, rc);
+        return false;
+    }
+    int has_a = (key_bits[KEY_A / 8] & (1 << (KEY_A % 8))) != 0;
+    int has_z = (key_bits[KEY_Z / 8] & (1 << (KEY_Z % 8))) != 0;
+    printf("  %s: ioctl rc=%d, has_a=%d, has_z=%d\n", path, rc, has_a, has_z);
+    return has_a && has_z;
+}
+
+static void mister_keyboard_init(void)
+{
+    num_keyboards = 0;
+    for (int i = 0; i < 32 && num_keyboards < MAX_KEYBOARDS; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "/dev/input/event%d", i);
+        int fd = open(path, O_RDONLY | O_NONBLOCK);
+        if (fd >= 0) {
+            bool is_kbd = is_keyboard(fd, path);
+            printf("rp6502-emu: checking %s (fd=%d) - is_keyboard=%s\n", path, fd, is_kbd ? "true" : "false");
+            if (is_kbd) {
+                int grab_rc = ioctl(fd, EVIOCGRAB, 1);
+                printf("  EVIOCGRAB rc=%d\n", grab_rc);
+                keyboard_fds[num_keyboards++] = fd;
+            } else {
+                close(fd);
+            }
+        }
+    }
+    printf("rp6502-emu: found %d USB keyboard(s)\n", num_keyboards);
+}
+
+static void mister_keyboard_shutdown(void)
+{
+    for (int i = 0; i < num_keyboards; i++) {
+        close(keyboard_fds[i]);
+    }
+    num_keyboards = 0;
+}
+
+static uint8_t evdev_to_hid(uint16_t code)
+{
+    switch (code)
+    {
+    case KEY_A: return 0x04;
+    case KEY_B: return 0x05;
+    case KEY_C: return 0x06;
+    case KEY_D: return 0x07;
+    case KEY_E: return 0x08;
+    case KEY_F: return 0x09;
+    case KEY_G: return 0x0A;
+    case KEY_H: return 0x0B;
+    case KEY_I: return 0x0C;
+    case KEY_J: return 0x0D;
+    case KEY_K: return 0x0E;
+    case KEY_L: return 0x0F;
+    case KEY_M: return 0x10;
+    case KEY_N: return 0x11;
+    case KEY_O: return 0x12;
+    case KEY_P: return 0x13;
+    case KEY_Q: return 0x14;
+    case KEY_R: return 0x15;
+    case KEY_S: return 0x16;
+    case KEY_T: return 0x17;
+    case KEY_U: return 0x18;
+    case KEY_V: return 0x19;
+    case KEY_W: return 0x1A;
+    case KEY_X: return 0x1B;
+    case KEY_Y: return 0x1C;
+    case KEY_Z: return 0x1D;
+
+    case KEY_1: return 0x1E;
+    case KEY_2: return 0x1F;
+    case KEY_3: return 0x20;
+    case KEY_4: return 0x21;
+    case KEY_5: return 0x22;
+    case KEY_6: return 0x23;
+    case KEY_7: return 0x24;
+    case KEY_8: return 0x25;
+    case KEY_9: return 0x26;
+    case KEY_0: return 0x27;
+
+    case KEY_ENTER: return 0x28;
+    case KEY_ESC: return 0x29;
+    case KEY_BACKSPACE: return 0x2A;
+    case KEY_TAB: return 0x2B;
+    case KEY_SPACE: return 0x2C;
+    case KEY_MINUS: return 0x2D;
+    case KEY_EQUAL: return 0x2E;
+    case KEY_LEFTBRACE: return 0x2F;
+    case KEY_RIGHTBRACE: return 0x30;
+    case KEY_BACKSLASH: return 0x31;
+    case KEY_SEMICOLON: return 0x33;
+    case KEY_APOSTROPHE: return 0x34;
+    case KEY_GRAVE: return 0x35;
+    case KEY_COMMA: return 0x36;
+    case KEY_DOT: return 0x37;
+    case KEY_SLASH: return 0x38;
+    case KEY_CAPSLOCK: return 0x39;
+
+    case KEY_F1: return 0x3A;
+    case KEY_F2: return 0x3B;
+    case KEY_F3: return 0x3C;
+    case KEY_F4: return 0x3D;
+    case KEY_F5: return 0x3E;
+    case KEY_F6: return 0x3F;
+    case KEY_F7: return 0x40;
+    case KEY_F8: return 0x41;
+    case KEY_F9: return 0x42;
+    case KEY_F10: return 0x43;
+    case KEY_F11: return 0x44;
+    case KEY_F12: return 0x45;
+
+    case KEY_RIGHT: return 0x4F;
+    case KEY_LEFT: return 0x50;
+    case KEY_DOWN: return 0x51;
+    case KEY_UP: return 0x52;
+
+    case KEY_NUMLOCK: return 0x53;
+    case KEY_KPSLASH: return 0x54;
+    case KEY_KPASTERISK: return 0x55;
+    case KEY_KPMINUS: return 0x56;
+    case KEY_KPPLUS: return 0x57;
+    case KEY_KPENTER: return 0x58;
+    case KEY_KP1: return 0x59;
+    case KEY_KP2: return 0x5A;
+    case KEY_KP3: return 0x5B;
+    case KEY_KP4: return 0x5C;
+    case KEY_KP5: return 0x5D;
+    case KEY_KP6: return 0x5E;
+    case KEY_KP7: return 0x5F;
+    case KEY_KP8: return 0x60;
+    case KEY_KP9: return 0x61;
+    case KEY_KP0: return 0x62;
+    case KEY_KPDOT: return 0x63;
+
+    case KEY_LEFTCTRL: return 0xE0;
+    case KEY_LEFTSHIFT: return 0xE1;
+    case KEY_LEFTALT: return 0xE2;
+    case KEY_LEFTMETA: return 0xE3;
+    case KEY_RIGHTCTRL: return 0xE4;
+    case KEY_RIGHTSHIFT: return 0xE5;
+    case KEY_RIGHTALT: return 0xE6;
+    case KEY_RIGHTMETA: return 0xE7;
+
+    default: return 0;
+    }
+}
+
+static char evdev_to_ascii(uint16_t code, bool shift)
+{
+    switch (code)
+    {
+    case KEY_A: return shift ? 'A' : 'a';
+    case KEY_B: return shift ? 'B' : 'b';
+    case KEY_C: return shift ? 'C' : 'c';
+    case KEY_D: return shift ? 'D' : 'd';
+    case KEY_E: return shift ? 'E' : 'e';
+    case KEY_F: return shift ? 'F' : 'f';
+    case KEY_G: return shift ? 'G' : 'g';
+    case KEY_H: return shift ? 'H' : 'h';
+    case KEY_I: return shift ? 'I' : 'i';
+    case KEY_J: return shift ? 'J' : 'j';
+    case KEY_K: return shift ? 'K' : 'k';
+    case KEY_L: return shift ? 'L' : 'l';
+    case KEY_M: return shift ? 'M' : 'm';
+    case KEY_N: return shift ? 'N' : 'n';
+    case KEY_O: return shift ? 'O' : 'o';
+    case KEY_P: return shift ? 'P' : 'p';
+    case KEY_Q: return shift ? 'Q' : 'q';
+    case KEY_R: return shift ? 'R' : 'r';
+    case KEY_S: return shift ? 'S' : 's';
+    case KEY_T: return shift ? 'T' : 't';
+    case KEY_U: return shift ? 'U' : 'u';
+    case KEY_V: return shift ? 'V' : 'v';
+    case KEY_W: return shift ? 'W' : 'w';
+    case KEY_X: return shift ? 'X' : 'x';
+    case KEY_Y: return shift ? 'Y' : 'y';
+    case KEY_Z: return shift ? 'Z' : 'z';
+    case KEY_1: return shift ? '!' : '1';
+    case KEY_2: return shift ? '@' : '2';
+    case KEY_3: return shift ? '#' : '3';
+    case KEY_4: return shift ? '$' : '4';
+    case KEY_5: return shift ? '%' : '5';
+    case KEY_6: return shift ? '^' : '6';
+    case KEY_7: return shift ? '&' : '7';
+    case KEY_8: return shift ? '*' : '8';
+    case KEY_9: return shift ? '(' : '9';
+    case KEY_0: return shift ? ')' : '0';
+    case KEY_SPACE: return ' ';
+    case KEY_MINUS: return shift ? '_' : '-';
+    case KEY_EQUAL: return shift ? '+' : '=';
+    case KEY_LEFTBRACE: return shift ? '{' : '[';
+    case KEY_RIGHTBRACE: return shift ? '}' : ']';
+    case KEY_BACKSLASH: return shift ? '|' : '\\';
+    case KEY_SEMICOLON: return shift ? ':' : ';';
+    case KEY_APOSTROPHE: return shift ? '"' : '\'';
+    case KEY_GRAVE: return shift ? '~' : '`';
+    case KEY_COMMA: return shift ? '<' : ',';
+    case KEY_DOT: return shift ? '>' : '.';
+    case KEY_SLASH: return shift ? '?' : '/';
+    default: return 0;
+    }
+}
+
+static void mister_keyboard_update(void)
+{
+    uint8_t ev_buf[16];
+    for (int i = 0; i < num_keyboards; i++)
+    {
+        int fd = keyboard_fds[i];
+        int rc;
+        while ((rc = read(fd, ev_buf, 16)) == 16)
+        {
+            uint16_t type = *(uint16_t*)&ev_buf[8];
+            uint16_t code = *(uint16_t*)&ev_buf[10];
+            int32_t value = *(int32_t*)&ev_buf[12];
+            
+            printf("rp6502-emu: fd=%d event: type=%d, code=%d, value=%d\n", fd, type, code, value);
+            
+            if (type == EV_KEY)
+            {
+                uint8_t hid = evdev_to_hid(code);
+                if (hid)
+                {
+                    kbd_hid_set(hid, value != 0);
+                }
+
+                if (value == 1 || value == 2) // Down or Repeat
+                {
+                    if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) s_shift = true;
+                    if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL) s_ctrl = true;
+                    if (code == KEY_LEFTALT || code == KEY_RIGHTALT) s_alt = true;
+
+                    kbd_key_t kbd_key_code = (kbd_key_t)-1;
+                    switch (code)
+                    {
+                    case KEY_ESC: kbd_key_code = KBD_KEY_ESCAPE; break;
+                    case KEY_ENTER: kbd_key_code = KBD_KEY_ENTER; break;
+                    case KEY_BACKSPACE: kbd_key_code = KBD_KEY_BACKSPACE; break;
+                    case KEY_TAB: kbd_key_code = KBD_KEY_TAB; break;
+                    case KEY_UP: kbd_key_code = KBD_KEY_UP; break;
+                    case KEY_DOWN: kbd_key_code = KBD_KEY_DOWN; break;
+                    case KEY_LEFT: kbd_key_code = KBD_KEY_LEFT; break;
+                    case KEY_RIGHT: kbd_key_code = KBD_KEY_RIGHT; break;
+                    case KEY_HOME: kbd_key_code = KBD_KEY_HOME; break;
+                    case KEY_END: kbd_key_code = KBD_KEY_END; break;
+                    case KEY_DELETE: kbd_key_code = KBD_KEY_DELETE; break;
+                    case KEY_INSERT: kbd_key_code = KBD_KEY_INSERT; break;
+                    case KEY_PAGEUP: kbd_key_code = KBD_KEY_PAGE_UP; break;
+                    case KEY_PAGEDOWN: kbd_key_code = KBD_KEY_PAGE_DOWN; break;
+                    case KEY_F1: kbd_key_code = KBD_KEY_F1; break;
+                    case KEY_F2: kbd_key_code = KBD_KEY_F2; break;
+                    case KEY_F3: kbd_key_code = KBD_KEY_F3; break;
+                    case KEY_F4: kbd_key_code = KBD_KEY_F4; break;
+                    case KEY_F5: kbd_key_code = KBD_KEY_F5; break;
+                    case KEY_F6: kbd_key_code = KBD_KEY_F6; break;
+                    case KEY_F7: kbd_key_code = KBD_KEY_F7; break;
+                    case KEY_F8: kbd_key_code = KBD_KEY_F8; break;
+                    case KEY_F9: kbd_key_code = KBD_KEY_F9; break;
+                    case KEY_F10: kbd_key_code = KBD_KEY_F10; break;
+                    case KEY_F11: kbd_key_code = KBD_KEY_F11; break;
+                    case KEY_F12: kbd_key_code = KBD_KEY_F12; break;
+                    default: break;
+                    }
+
+                    if (kbd_key_code != (kbd_key_t)-1)
+                    {
+                        kbd_key(kbd_key_code, s_ctrl, s_shift, s_alt);
+                    }
+                    else
+                    {
+                        char ch = evdev_to_ascii(code, s_shift);
+                        if (ch)
+                        {
+                            if (s_ctrl)
+                            {
+                                kbd_ctrl_letter(ch);
+                            }
+                            else
+                            {
+                                char u[2] = {ch, 0};
+                                kbd_text(u);
+                            }
+                        }
+                    }
+                }
+                else if (value == 0) // Up
+                {
+                    if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) s_shift = false;
+                    if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL) s_ctrl = false;
+                    if (code == KEY_LEFTALT || code == KEY_RIGHTALT) s_alt = false;
+                }
+            }
+        }
+    }
+}
+
+static bool mister_video_init(void)
+{
+    mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+    if (mem_fd < 0) {
+        perror("Mister video open /dev/mem");
+        return false;
+    }
+    ddr_base = (volatile uint8_t*)mmap(NULL, NV_DDR_REGION_SIZE,
+        PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, NV_DDR_PHYS_BASE);
+    if (ddr_base == MAP_FAILED) {
+        perror("Mister video mmap");
+        ddr_base = NULL;
+        close(mem_fd);
+        mem_fd = -1;
+        return false;
+    }
+
+    memset((void*)(ddr_base + NV_BUF0_OFFSET), 0, NV_FRAME_BYTES);
+    memset((void*)(ddr_base + NV_BUF1_OFFSET), 0, NV_FRAME_BYTES);
+    volatile uint32_t* ctrl = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
+    *ctrl = 0;
+    frame_counter = 0;
+    active_buf = 0;
+
+    volatile uint32_t* feedback = (volatile uint32_t*)(ddr_base + NV_FEEDBACK_OFFSET);
+    *feedback = 0;
+
+    return true;
+}
+
+static void mister_video_shutdown(void)
+{
+    if (ddr_base) {
+        volatile uint32_t* ctrl = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
+        *ctrl = 0;
+        munmap((void*)ddr_base, NV_DDR_REGION_SIZE);
+        ddr_base = NULL;
+    }
+    if (mem_fd >= 0) {
+        close(mem_fd);
+        mem_fd = -1;
+    }
+}
+
+static void mister_input_init(void)
+{
+    joy_fd = open("/dev/shm/thirdsarm-joy", O_RDONLY);
+    if (joy_fd >= 0) {
+        mister_shm = (MisterJoyShm *)mmap(NULL, sizeof(MisterJoyShm), PROT_READ, MAP_SHARED, joy_fd, 0);
+        if (mister_shm == MAP_FAILED) {
+            mister_shm = NULL;
+            close(joy_fd);
+            joy_fd = -1;
+        }
+    }
+    mister_keyboard_init();
+}
+
+static void mister_input_shutdown(void)
+{
+    mister_keyboard_shutdown();
+    if (mister_shm) {
+        munmap(mister_shm, sizeof(MisterJoyShm));
+        mister_shm = NULL;
+    }
+    if (joy_fd >= 0) {
+        close(joy_fd);
+        joy_fd = -1;
+    }
+}
+
+static void mister_input_update(void)
+{
+    mister_keyboard_update();
+
+    if (!mister_shm) return;
+    if (mister_shm->magic != 0x33534152) return;
+
+    for (int player = 0; player < 2; player++) {
+        uint32_t m = mister_shm->joy_mask[player];
+        
+        pad_connect(player, true);
+        
+        uint8_t dpad = 0;
+        if (m & (1 << 3)) dpad |= 0x01; // Up
+        if (m & (1 << 2)) dpad |= 0x02; // Down
+        if (m & (1 << 1)) dpad |= 0x04; // Left
+        if (m & (1 << 0)) dpad |= 0x08; // Right
+
+        uint8_t button0 = 0;
+        if (m & (1 << 7)) button0 |= 0x01; // South (Cross) -> A
+        if (m & (1 << 8)) button0 |= 0x02; // East (Circle) -> B
+        if (m & (1 << 4)) button0 |= 0x08; // West (Square) -> X
+        if (m & (1 << 5)) button0 |= 0x10; // North (Triangle) -> Y
+        if (m & (1 << 6)) button0 |= 0x80; // Right Shoulder (R1) -> R1
+
+        uint8_t button1 = 0;
+        if (m & (1 << 9)) button1 |= 0x02;  // Right Trigger (R2) -> R2
+        if (m & (1 << 10)) button1 |= 0x04; // Select (Back) -> SELECT
+        if (m & (1 << 11)) button1 |= 0x08; // Start -> START
+
+        int lx = mister_shm->left_stick_x[player];
+        int ly = mister_shm->left_stick_y[player];
+        int rx = mister_shm->right_stick_x[player];
+        int ry = mister_shm->right_stick_y[player];
+
+        pad_host_report(player, dpad, button0, button1, lx, ly, rx, ry, 0, 0, false);
+    }
+}
+
+static void write_frame_mister(const uint32_t *src_fb, int src_w, int src_h)
+{
+    uint32_t buf_offset = (active_buf == 0) ? NV_BUF0_OFFSET : NV_BUF1_OFFSET;
+    volatile uint16_t *dst = (volatile uint16_t *)(ddr_base + buf_offset);
+
+    // Clear local framebuffer to black first to handle margins/padding cleanly
+    memset(local_fb, 0, sizeof(local_fb));
+
+    if (src_w == 320 && src_h == 240)
+    {
+        // 320x240 -> crop 8 lines off top/bottom, pad 32 pixels left/right
+        for (int y = 0; y < 224; y++)
+        {
+            const uint32_t *src_row = src_fb + (y + 8) * 320;
+            uint16_t *dst_row = local_fb + y * 384 + 32;
+            for (int x = 0; x < 320; x++)
+            {
+                uint32_t p = src_row[x];
+                uint8_t r = p & 0xFF;
+                uint8_t g = (p >> 8) & 0xFF;
+                uint8_t b = (p >> 16) & 0xFF;
+                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            }
+        }
+    }
+    else if (src_w == 640 && src_h == 480)
+    {
+        // 640x480 -> downscale 2x, crop 8 lines off top/bottom (16 on 640 scale), pad 32 left/right
+        for (int y = 0; y < 224; y++)
+        {
+            const uint32_t *src_row = src_fb + (y * 2 + 16) * 640;
+            uint16_t *dst_row = local_fb + y * 384 + 32;
+            for (int x = 0; x < 320; x++)
+            {
+                uint32_t p = src_row[x * 2];
+                uint8_t r = p & 0xFF;
+                uint8_t g = (p >> 8) & 0xFF;
+                uint8_t b = (p >> 16) & 0xFF;
+                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            }
+        }
+    }
+    else if (src_w == 320 && src_h == 180)
+    {
+        // 320x180 -> pad 22 lines top/bottom, pad 32 left/right
+        for (int y = 0; y < 180; y++)
+        {
+            const uint32_t *src_row = src_fb + y * 320;
+            uint16_t *dst_row = local_fb + (y + 22) * 384 + 32;
+            for (int x = 0; x < 320; x++)
+            {
+                uint32_t p = src_row[x];
+                uint8_t r = p & 0xFF;
+                uint8_t g = (p >> 8) & 0xFF;
+                uint8_t b = (p >> 16) & 0xFF;
+                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            }
+        }
+    }
+    else if (src_w == 640 && src_h == 360)
+    {
+        // 640x360 -> downscale 2x to 320x180, pad 22 lines top/bottom, pad 32 left/right
+        for (int y = 0; y < 180; y++)
+        {
+            const uint32_t *src_row = src_fb + (y * 2) * 640;
+            uint16_t *dst_row = local_fb + (y + 22) * 384 + 32;
+            for (int x = 0; x < 320; x++)
+            {
+                uint32_t p = src_row[x * 2];
+                uint8_t r = p & 0xFF;
+                uint8_t g = (p >> 8) & 0xFF;
+                uint8_t b = (p >> 16) & 0xFF;
+                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            }
+        }
+    }
+    else
+    {
+        // General fallback
+        int copy_w = src_w < 384 ? src_w : 384;
+        int copy_h = src_h < 224 ? src_h : 224;
+        int start_x = (384 - copy_w) / 2;
+        int start_y = (224 - copy_h) / 2;
+        for (int y = 0; y < copy_h; y++)
+        {
+            const uint32_t *src_row = src_fb + y * src_w;
+            uint16_t *dst_row = local_fb + (y + start_y) * 384 + start_x;
+            for (int x = 0; x < copy_w; x++)
+            {
+                uint32_t p = src_row[x];
+                uint8_t r = p & 0xFF;
+                uint8_t g = (p >> 8) & 0xFF;
+                uint8_t b = (p >> 16) & 0xFF;
+                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            }
+        }
+    }
+
+    // Single burst write to uncacheable DDR3 physical memory
+    memcpy((void*)dst, local_fb, NV_FRAME_BYTES);
+
+    frame_counter++;
+    volatile uint32_t* ctrl = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
+    *ctrl = (frame_counter << 2) | (active_buf & 1);
+    active_buf ^= 1;
+}
+
+int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exit_on_halt)
+{
+    (void)scale;
+    (void)have_scale;
+    (void)vsync;
+
+    // Unbuffer stdout/stderr to ensure log outputs are flushed to the log file immediately
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
+#if defined(EMU_WITH_AUDIO)
+    // Override the built-in ALSA config path with the MiSTer system config path
+    setenv("ALSA_CONFIG_PATH", "/usr/share/alsa/alsa.conf", 1);
+#endif
+
+    if (!mister_video_init())
+    {
+        fprintf(stderr, "rp6502-emu: failed to initialize MiSTer video\n");
+        return 1;
+    }
+
+    mister_input_init();
+
+#if defined(EMU_WITH_AUDIO)
+    saudio_setup(&(saudio_desc){
+        .num_channels = 2,
+        .sample_rate = 44100,
+        .buffer_frames = 1024
+    });
+#endif
+
+    printf("rp6502-emu: running on MiSTer FPGA\n");
+
+    const uint64_t frame_duration_ns = 16666667ull;
+    uint64_t next_frame_time_ns = os_mono_ns();
+
+    while (true)
+    {
+        if (exit_on_halt && cpu_halted())
+        {
+            printf("rp6502-emu: CPU halted, exiting\n");
+            break;
+        }
+
+        uint64_t t0 = os_mono_ns();
+        main_run_frame();
+        uint64_t t1 = os_mono_ns();
+#if defined(EMU_WITH_AUDIO)
+        audio_out_pump();
+#endif
+        uint64_t t2 = os_mono_ns();
+        mister_input_update();
+        uint64_t t3 = os_mono_ns();
+
+        int cw, ch;
+        vga_canvas_size(&cw, &ch);
+        write_frame_mister(fb, cw, ch);
+        uint64_t t4 = os_mono_ns();
+
+        static uint64_t total_emu_ns = 0;
+        static uint64_t total_audio_ns = 0;
+        static uint64_t total_input_ns = 0;
+        static uint64_t total_video_ns = 0;
+        static int stats_frames = 0;
+
+        total_emu_ns += (t1 - t0);
+        total_audio_ns += (t2 - t1);
+        total_input_ns += (t3 - t2);
+        total_video_ns += (t4 - t3);
+        stats_frames++;
+
+        if (stats_frames >= 60)
+        {
+            printf("rp6502-emu stats (ms/frame): cpu=%.2f vga=%.2f audio=%.2f input=%.2f video=%.2f total=%.2f\n",
+                (double)g_cpu_time_ns / stats_frames / 1000000.0,
+                (double)g_vga_time_ns / stats_frames / 1000000.0,
+                (double)total_audio_ns / stats_frames / 1000000.0,
+                (double)total_input_ns / stats_frames / 1000000.0,
+                (double)total_video_ns / stats_frames / 1000000.0,
+                (double)(g_cpu_time_ns + g_vga_time_ns + total_audio_ns + total_input_ns + total_video_ns) / stats_frames / 1000000.0);
+            g_cpu_time_ns = 0;
+            g_vga_time_ns = 0;
+            total_audio_ns = 0;
+            total_input_ns = 0;
+            total_video_ns = 0;
+            stats_frames = 0;
+        }
+
+        next_frame_time_ns += frame_duration_ns;
+        os_sleep_until_ns(next_frame_time_ns);
+    }
+
+#if defined(EMU_WITH_AUDIO)
+    saudio_shutdown();
+#endif
+    mister_input_shutdown();
+    mister_video_shutdown();
+    return main_exit_code();
+}
+
+void window_set_bgcolor(uint8_t r, uint8_t g, uint8_t b) { (void)r, (void)g, (void)b; }
+void window_set_scale_filter(window_scale_filter_t filter) { (void)filter; }
+void window_set_scale(double scale) { (void)scale; }
+double window_get_scale(void) { return 1.0; }
+
+#if defined(EMU_WITH_AUDIO)
+#define SOKOL_AUDIO_IMPL
+#include "sokol_audio.h"
+#endif
+
+#else // Normal headless fallback (non-MISTER)
 
 int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exit_on_halt)
 {
@@ -34,14 +723,11 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
 }
 
 void window_set_bgcolor(uint8_t r, uint8_t g, uint8_t b) { (void)r, (void)g, (void)b; }
-
-/* Headless renders at native resolution (no canvas->window scaling), so the
- * filter is genuinely a no-op here. */
 void window_set_scale_filter(window_scale_filter_t filter) { (void)filter; }
-
 void window_set_scale(double scale) { (void)scale; }
-
 double window_get_scale(void) { return 0.0; }
+
+#endif // MISTER
 
 #else
 
