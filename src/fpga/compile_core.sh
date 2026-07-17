@@ -16,11 +16,17 @@ MISTER_USER="${MISTER_USER:-root}"
 MISTER_PASS="${MISTER_PASS:-}"
 HPS_BINARY_OVERRIDE="${HPS_BINARY_OVERRIDE:-}"
 CORE_RBF_OVERRIDE="${CORE_RBF_OVERRIDE:-}"
+ARM_IF_WRAPPER_BIN_REMOTE="${ARM_IF_WRAPPER_BIN_REMOTE:-/media/fat/rp6502-mister-wrapper}"
+ARM_IF_CTL_BIN_REMOTE="${ARM_IF_CTL_BIN_REMOTE:-/media/fat/rp6502-mister-ctl}"
+ARM_IF_REG_FILE_REMOTE="${ARM_IF_REG_FILE_REMOTE:-/tmp/rp6502_arm_if.bin}"
+ARM_IF_RUNTIME_PATH="${ARM_IF_RUNTIME_PATH:-/bin/sleep}"
+ARM_IF_RUNTIME_ARG="${ARM_IF_RUNTIME_ARG:-2}"
 
 DO_FPGA=1
 DO_HPS=1
 DO_DEPLOY=0
 DEPLOY_MODE="artifacts-only"
+DO_ARM_IF_SMOKE=0
 
 usage() {
     cat <<'EOF'
@@ -41,11 +47,17 @@ Options:
   --host <host>    MiSTer host (default: mister)
   --user <user>    MiSTer user (default: root)
   --password <p>   MiSTer password (or use MISTER_PASS env)
+    --smoke-arm-if   Run rp6502-mister-wrapper/ctl wait-ready+smoke on MiSTer
   --help           Show this help
 
 Env overrides:
     HPS_BINARY_OVERRIDE=<path>  Use specific MiSTer_3S-ARM binary for packaging
     CORE_RBF_OVERRIDE=<path>    Use specific 3S-ARM*.rbf for packaging
+    ARM_IF_WRAPPER_BIN_REMOTE=<path>  Remote wrapper binary path
+    ARM_IF_CTL_BIN_REMOTE=<path>      Remote control utility path
+    ARM_IF_REG_FILE_REMOTE=<path>     Remote shared transport file path
+    ARM_IF_RUNTIME_PATH=<path>        Runtime path used by smoke command
+    ARM_IF_RUNTIME_ARG=<arg>          Runtime argument used by smoke command
 
 Legacy notes:
   --stage* / --template / --legacy options are out of scope on this branch and
@@ -56,6 +68,19 @@ EOF
 warn_ignored_legacy_mode() {
     local mode="$1"
     echo "warning: ignoring unsupported legacy target option: ${mode}" >&2
+}
+
+run_ssh() {
+    local cmd="$1"
+    if [[ -n "$MISTER_PASS" ]]; then
+        if ! command -v sshpass >/dev/null 2>&1; then
+            echo "error: MISTER_PASS is set but sshpass is not installed" >&2
+            exit 1
+        fi
+        SSHPASS="$MISTER_PASS" sshpass -e ssh -x -o StrictHostKeyChecking=accept-new "${MISTER_USER}@${MISTER_HOST}" "$cmd"
+    else
+        ssh -x -o StrictHostKeyChecking=accept-new "${MISTER_USER}@${MISTER_HOST}" "$cmd"
+    fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -87,6 +112,10 @@ while [[ $# -gt 0 ]]; do
         --password)
             MISTER_PASS="$2"
             shift 2
+            ;;
+        --smoke-arm-if)
+            DO_ARM_IF_SMOKE=1
+            shift
             ;;
         --template|--legacy|--stage2|--stage3|--stage4|--stage5|--stage6|--stage7|--stage8|--stage9|--stage10)
             warn_ignored_legacy_mode "$1"
@@ -199,6 +228,16 @@ if [[ "$DO_DEPLOY" -eq 1 ]]; then
     fi
 
     "$MISTERCTL_SH" "${deploy_args[@]}"
+
+    if [[ "$DO_ARM_IF_SMOKE" -eq 1 ]]; then
+        echo "== ARM IF smoke on ${MISTER_USER}@${MISTER_HOST}"
+
+        run_ssh "killall rp6502-mister-wrapper >/dev/null 2>&1 || true"
+        run_ssh "nohup '${ARM_IF_WRAPPER_BIN_REMOTE}' --transport file --reg-file '${ARM_IF_REG_FILE_REMOTE}' --poll-ms 1 >/tmp/rp6502-wrapper.log 2>&1 &"
+        run_ssh "'${ARM_IF_CTL_BIN_REMOTE}' --transport file --reg-file '${ARM_IF_REG_FILE_REMOTE}' --timeout-ms 4000 wait-ready"
+        run_ssh "'${ARM_IF_CTL_BIN_REMOTE}' --transport file --reg-file '${ARM_IF_REG_FILE_REMOTE}' --runtime '${ARM_IF_RUNTIME_PATH}' --runtime-arg '${ARM_IF_RUNTIME_ARG}' --timeout-ms 4000 smoke"
+        run_ssh "killall rp6502-mister-wrapper >/dev/null 2>&1 || true"
+    fi
 fi
 
 echo "Done."
