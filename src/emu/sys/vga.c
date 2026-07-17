@@ -291,6 +291,17 @@ static void render_scanline(int y, uint32_t *fb)
                 }
                 return;
             }
+            // Compositing loop: sequential & vectorized!
+            uint16_t temp_row[VGA_MAX_WIDTH];
+            for (int x = 0; x < W; x++)
+            {
+                uint16_t px = plane[base][x];
+                for (int i = base + 1; i < SCANVIDEO_PLANE_COUNT; i++)
+                    if (filled[i] && (plane[i][x] & SCANVIDEO_ALPHA_MASK))
+                        px = plane[i][x];
+                temp_row[x] = g_lut_rgb565[px];
+            }
+            // Scaling and burst copy loop
             uint32_t x_step_16 = (W << 16) / 384;
             for (int dst_y = y_start; dst_y < y_end; dst_y++)
             {
@@ -300,12 +311,7 @@ static void render_scanline(int y, uint32_t *fb)
                 {
                     int src_x = x_accum_16 >> 16;
                     x_accum_16 += x_step_16;
-                    
-                    uint16_t px = plane[base][src_x];
-                    for (int i = base + 1; i < SCANVIDEO_PLANE_COUNT; i++)
-                        if (filled[i] && (plane[i][src_x] & SCANVIDEO_ALPHA_MASK))
-                            px = plane[i][src_x];
-                    dst_row[x] = g_lut_rgb565[px];
+                    dst_row[x] = temp_row[src_x];
                 }
                 memcpy((void*)(dst_mem + dst_y * 384 * 2), dst_row, 384 * 2);
             }
