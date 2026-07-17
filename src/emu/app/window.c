@@ -502,21 +502,26 @@ void mister_write_scanline(int line)
     int y_start = line * 224 / ch;
     int y_end = (line + 1) * 224 / ch;
     if (y_end > 224) y_end = 224;
+    if (y_start >= y_end) return;
 
     uint8_t* dst = (uint8_t*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
     const uint32_t *src_row = g_fb + line * cw;
+    uint32_t x_step_16 = (cw << 16) / 384;
 
     for (int y = y_start; y < y_end; y++)
     {
         uint16_t *dst_row = (uint16_t*)(dst + y * 384 * 2);
+        uint32_t x_accum_16 = 0;
         for (int x = 0; x < 384; x++)
         {
-            int src_x = x * cw / 384;
+            int src_x = x_accum_16 >> 16;
+            x_accum_16 += x_step_16;
+            
             uint32_t pixel = src_row[src_x];
-            uint8_t r = pixel & 0xFF;
-            uint8_t g = (pixel >> 8) & 0xFF;
-            uint8_t b = (pixel >> 16) & 0xFF;
-            dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            uint16_t r5 = (pixel & 0xF8u) << 8;
+            uint16_t g6 = (pixel & 0xFC00u) >> 5;
+            uint16_t b5 = (pixel & 0xF80000u) >> 19;
+            dst_row[x] = r5 | g6 | b5;
         }
     }
 }
