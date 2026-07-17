@@ -53,6 +53,7 @@ static volatile uint8_t* ddr_base = NULL;
 static uint32_t frame_counter = 0;
 static int active_buf = 0;
 static uint16_t local_fb[384 * 224];
+static uint32_t *g_fb = NULL;
 
 extern uint64_t g_vga_time_ns;
 extern uint64_t g_cpu_time_ns;
@@ -490,107 +491,39 @@ static void mister_input_update(void)
     }
 }
 
-static void write_frame_mister(const uint32_t *src_fb, int src_w, int src_h)
+void mister_write_scanline(int line)
 {
-    uint32_t buf_offset = (active_buf == 0) ? NV_BUF0_OFFSET : NV_BUF1_OFFSET;
-    volatile uint16_t *dst = (volatile uint16_t *)(ddr_base + buf_offset);
+    if (!ddr_base || !g_fb) return;
 
-    // Clear local framebuffer to black first to handle margins/padding cleanly
-    memset(local_fb, 0, sizeof(local_fb));
+    int cw, ch;
+    vga_canvas_size(&cw, &ch);
 
-    if (src_w == 320 && src_h == 240)
-    {
-        // 320x240 -> crop 8 lines off top/bottom, pad 32 pixels left/right
-        for (int y = 0; y < 224; y++)
-        {
-            const uint32_t *src_row = src_fb + (y + 8) * 320;
-            uint16_t *dst_row = local_fb + y * 384 + 32;
-            for (int x = 0; x < 320; x++)
-            {
-                uint32_t p = src_row[x];
-                uint8_t r = p & 0xFF;
-                uint8_t g = (p >> 8) & 0xFF;
-                uint8_t b = (p >> 16) & 0xFF;
-                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-            }
-        }
-    }
-    else if (src_w == 640 && src_h == 480)
-    {
-        // 640x480 -> downscale 2x, crop 8 lines off top/bottom (16 on 640 scale), pad 32 left/right
-        for (int y = 0; y < 224; y++)
-        {
-            const uint32_t *src_row = src_fb + (y * 2 + 16) * 640;
-            uint16_t *dst_row = local_fb + y * 384 + 32;
-            for (int x = 0; x < 320; x++)
-            {
-                uint32_t p = src_row[x * 2];
-                uint8_t r = p & 0xFF;
-                uint8_t g = (p >> 8) & 0xFF;
-                uint8_t b = (p >> 16) & 0xFF;
-                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-            }
-        }
-    }
-    else if (src_w == 320 && src_h == 180)
-    {
-        // 320x180 -> pad 22 lines top/bottom, pad 32 left/right
-        for (int y = 0; y < 180; y++)
-        {
-            const uint32_t *src_row = src_fb + y * 320;
-            uint16_t *dst_row = local_fb + (y + 22) * 384 + 32;
-            for (int x = 0; x < 320; x++)
-            {
-                uint32_t p = src_row[x];
-                uint8_t r = p & 0xFF;
-                uint8_t g = (p >> 8) & 0xFF;
-                uint8_t b = (p >> 16) & 0xFF;
-                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-            }
-        }
-    }
-    else if (src_w == 640 && src_h == 360)
-    {
-        // 640x360 -> downscale 2x to 320x180, pad 22 lines top/bottom, pad 32 left/right
-        for (int y = 0; y < 180; y++)
-        {
-            const uint32_t *src_row = src_fb + (y * 2) * 640;
-            uint16_t *dst_row = local_fb + (y + 22) * 384 + 32;
-            for (int x = 0; x < 320; x++)
-            {
-                uint32_t p = src_row[x * 2];
-                uint8_t r = p & 0xFF;
-                uint8_t g = (p >> 8) & 0xFF;
-                uint8_t b = (p >> 16) & 0xFF;
-                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-            }
-        }
-    }
-    else
-    {
-        // General fallback
-        int copy_w = src_w < 384 ? src_w : 384;
-        int copy_h = src_h < 224 ? src_h : 224;
-        int start_x = (384 - copy_w) / 2;
-        int start_y = (224 - copy_h) / 2;
-        for (int y = 0; y < copy_h; y++)
-        {
-            const uint32_t *src_row = src_fb + y * src_w;
-            uint16_t *dst_row = local_fb + (y + start_y) * 384 + start_x;
-            for (int x = 0; x < copy_w; x++)
-            {
-                uint32_t p = src_row[x];
-                uint8_t r = p & 0xFF;
-                uint8_t g = (p >> 8) & 0xFF;
-                uint8_t b = (p >> 16) & 0xFF;
-                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-            }
-        }
-    }
+    // Map this source line to target line(s)
+    int y_start = line * 224 / ch;
+    int y_end = (line + 1) * 224 / ch;
+    if (y_end > 224) y_end = 224;
 
-    // Single burst write to uncacheable DDR3 physical memory
-    memcpy((void*)dst, local_fb, NV_FRAME_BYTES);
+    uint8_t* dst = (uint8_t*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
+    const uint32_t *src_row = g_fb + line * cw;
 
+    for (int y = y_start; y < y_end; y++)
+    {
+        uint16_t *dst_row = (uint16_t*)(dst + y * 384 * 2);
+        for (int x = 0; x < 384; x++)
+        {
+            int src_x = x * cw / 384;
+            uint32_t pixel = src_row[src_x];
+            uint8_t r = pixel & 0xFF;
+            uint8_t g = (pixel >> 8) & 0xFF;
+            uint8_t b = (pixel >> 16) & 0xFF;
+            dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+        }
+    }
+}
+
+static void swap_frame_mister(void)
+{
+    if (!ddr_base) return;
     frame_counter++;
     volatile uint32_t* ctrl = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
     *ctrl = (frame_counter << 2) | (active_buf & 1);
@@ -619,6 +552,8 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
     }
 
     mister_input_init();
+    extern void (*mister_write_scanline_cb)(int line);
+    mister_write_scanline_cb = mister_write_scanline;
 
 #if defined(EMU_WITH_AUDIO)
     saudio_setup(&(saudio_desc){
@@ -642,7 +577,9 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
         }
 
         uint64_t t0 = os_mono_ns();
-        main_run_frame();
+        g_fb = fb;
+        while (!main_run_scanline(true))
+            ;
         uint64_t t1 = os_mono_ns();
 #if defined(EMU_WITH_AUDIO)
         audio_out_pump();
@@ -651,9 +588,7 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
         mister_input_update();
         uint64_t t3 = os_mono_ns();
 
-        int cw, ch;
-        vga_canvas_size(&cw, &ch);
-        write_frame_mister(fb, cw, ch);
+        swap_frame_mister();
         uint64_t t4 = os_mono_ns();
 
         static uint64_t total_emu_ns = 0;

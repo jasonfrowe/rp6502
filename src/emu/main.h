@@ -24,6 +24,7 @@ extern "C"
 void main_init(void);               /* cold boot: fan out to every subsystem */
 void main_run_frame(void);          /* run one 60 Hz VGA frame, rendering it */
 void main_run_frame_norender(void); /* same, but skip pixel rendering (catch-up) */
+bool main_run_scanline(bool render); /* run a single scanline, returns true if frame completed */
 
 unsigned long main_frame_count(void); /* diagnostic: total frames, advances at 60 Hz */
 

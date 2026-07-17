@@ -129,7 +129,17 @@ static bool run_until(uint64_t deadline_8, bool dbg)
  * runs PHI2/scanline-rate cycles and the video is paced by the same clock. The
  * vsync counter ($FFE3) ticks at the highest scanline any program renders. The
  * app loop calls this at 60 Hz regardless of the host display's refresh rate. */
-static void run_frame(bool render)
+static int s_run_line = 0;
+static bool s_run_vsynced = false;
+static uint64_t s_run_frame_end_n = 0;
+static bool s_in_frame = false;
+
+void (*mister_write_scanline_cb)(int line) = NULL;
+
+/* Run a single scanline, returning true when the entire frame (525 scanlines)
+ * has completed. This allows the HPS video writer to stream scanline-by-scanline
+ * instead of buffering and copying the entire frame at once. */
+bool main_run_scanline(bool render)
 {
     /* Debugger hold: only the 6502 and virtual time freeze. Console output that
      * reached the terminal after the beam passed its row this frame (a program's
@@ -148,88 +158,107 @@ static void run_frame(bool render)
                 vga_render_scanline(line);
             stop_swept = true;
         }
-        return;
+        return true;
     }
     stop_swept = false;
 
+    if (!s_in_frame)
+    {
+        s_run_frame_end_n = scanline_n + VGA_SCANLINES;
+        s_run_line = 0;
+        s_run_vsynced = false;
+        s_in_frame = true;
+    }
+
     const int vsync_line = vga_vsync_scanline();
     const int canvas_h = vga_canvas_height();
-    const uint64_t frame_end_n = scanline_n + VGA_SCANLINES;
-    int line = 0; /* 0-based scanline within this frame */
-    bool vsynced = false;
 
-    while (scanline_n < frame_end_n)
+    /* Raster-accurate scanout: draw this visible line from the CURRENT
+     * machine state BEFORE its CPU cycles run, so a mid-frame register/VRAM
+     * write only affects later lines (real per-scanline VGA behavior). A
+     * catch-up frame (render == false) skips the pixels but keeps the timing. */
+    if (render && s_run_line < canvas_h)
     {
-        /* Raster-accurate scanout: draw this visible line from the CURRENT
-         * machine state BEFORE its CPU cycles run, so a mid-frame register/VRAM
-         * write only affects later lines (real per-scanline VGA behavior). A
-         * catch-up frame (render == false) skips the pixels but keeps the timing. */
-        if (render && line < canvas_h)
-        {
-            uint64_t v0 = os_mono_ns();
-            vga_render_scanline(line);
-            uint64_t v1 = os_mono_ns();
-            g_vga_time_ns += (v1 - v0);
-        }
+        uint64_t v0 = os_mono_ns();
+        vga_render_scanline(s_run_line);
+        uint64_t v1 = os_mono_ns();
+        g_vga_time_ns += (v1 - v0);
 
-        uint64_t c0 = os_mono_ns();
-        bool held = run_until(scanline_deadline_8(scanline_n + 1), dbg);
-        uint64_t c1 = os_mono_ns();
-        g_cpu_time_ns += (c1 - c0);
-
-        if (held)
-            return; /* held at a breakpoint mid-frame; resume re-runs the frame */
-        std_task(); /* drain read_xram's PIX gate before the op re-polls */
-        api_task(); /* poll in-flight I/O each scanline (RIA super-loop analog) */
-        term_task(); /* VGA chip super-loop analog: per scanline, so the
-                      * one-row-per-tick lazy clears drain within the frame
-                      * that issued them, not one row per frame */
-        scanline_n++;
-        if (!vsynced && line + 1 >= vsync_line)
-        {
-            REGS(0xFFE3) = (uint8_t)(REGS(0xFFE3) + 1); /* VSYNC counter, 8-bit wrap */
-            ria_trigger_vsync(); /* latch $FFF0 bit7; raises IRQ only if the program enabled it */
-            vsynced = true;
-        }
-        line++;
+        if (mister_write_scanline_cb)
+            mister_write_scanline_cb(s_run_line);
     }
 
-    s_frame_count++;
-    /* Pump the line editor (drains keyboard + terminal replies, echoes, fires
-     * the read callback) then advance any blocking syscall waiting on it. */
-    rln_task();
-    ria_task();
-    aud_task();
+    uint64_t c0 = os_mono_ns();
+    bool held = run_until(scanline_deadline_8(scanline_n + 1), dbg);
+    uint64_t c1 = os_mono_ns();
+    g_cpu_time_ns += (c1 - c0);
 
-    /* An exec committed this frame: load the new program and restart the CPU,
-     * keeping the master clock and the argv pro_api_exec stored. The terminal
-     * and VGA state are NOT reset — the new program's output appends to the
-     * existing screen, as on real hardware. */
-    const char *exec_path = pro_take_exec();
-    if (exec_path)
+    if (held)
+        return false; /* held at a breakpoint mid-frame; resume re-runs the frame */
+    std_task(); /* drain read_xram's PIX gate before the op re-polls */
+    api_task(); /* poll in-flight I/O each scanline (RIA super-loop analog) */
+    term_task(); /* VGA chip super-loop analog: per scanline, so the
+                  * one-row-per-tick lazy clears drain within the frame
+                  * that issued them, not one row per frame */
+    scanline_n++;
+    if (!s_run_vsynced && s_run_line + 1 >= vsync_line)
     {
-        if (!rom_load(exec_path))
-        {
-            fprintf(stderr, "rp6502-emu: exec failed to load '%s'\n", exec_path);
-            cpu_set_halted(true);
-            s_exit_code = 1;
-        }
-        else
-        {
-            ria_reset(); /* RIA/std/kbd/atr/clk; clears halt, keeps VSYNC + screen */
-            cpu_reset();
-            via_reset();
-            pro_run();
-        }
+        REGS(0xFFE3) = (uint8_t)(REGS(0xFFE3) + 1); /* VSYNC counter, 8-bit wrap */
+        ria_trigger_vsync(); /* latch $FFF0 bit7; raises IRQ only if the program enabled it */
+        s_run_vsynced = true;
     }
+    s_run_line++;
+
+    if (scanline_n >= s_run_frame_end_n)
+    {
+        s_frame_count++;
+        /* Pump the line editor (drains keyboard + terminal replies, echoes, fires
+         * the read callback) then advance any blocking syscall waiting on it. */
+        rln_task();
+        ria_task();
+        aud_task();
+
+        /* An exec committed this frame: load the new program and restart the CPU,
+         * keeping the master clock and the argv pro_api_exec stored. The terminal
+         * and VGA state are NOT reset — the new program's output appends to the
+         * existing screen, as on real hardware. */
+        const char *exec_path = pro_take_exec();
+        if (exec_path)
+        {
+            if (!rom_load(exec_path))
+            {
+                fprintf(stderr, "rp6502-emu: exec failed to load '%s'\n", exec_path);
+                cpu_set_halted(true);
+                s_exit_code = 1;
+            }
+            else
+            {
+                ria_reset(); /* RIA/std/kbd/atr/clk; clears halt, keeps VSYNC + screen */
+                cpu_reset();
+                via_reset();
+                pro_run();
+            }
+        }
+        s_in_frame = false;
+        return true;
+    }
+    return false;
 }
 
-void main_run_frame(void) { run_frame(true); }
+void main_run_frame(void)
+{
+    while (!main_run_scanline(true))
+        ;
+}
 
 /* Run one frame WITHOUT rendering — a catch-up frame the pacer will not present.
  * CPU/chip/timing/vsync all advance; only the per-scanline pixel work is skipped
  * (most of the per-frame cost), so catching up after a slow/stalled host is cheap. */
-void main_run_frame_norender(void) { run_frame(false); }
+void main_run_frame_norender(void)
+{
+    while (!main_run_scanline(false))
+        ;
+}
 
 /* ------------------------------------------------------------------ */
 /* xreg (op 0x01): marshal device/channel/address + words off the xstack */
