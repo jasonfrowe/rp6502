@@ -14,6 +14,9 @@ S3_ROOT="${S3_ROOT:-/home/rowe/Software/rp6502/3s-mister-arm}"
 MISTER_HOST="${MISTER_HOST:-mister}"
 MISTER_USER="${MISTER_USER:-root}"
 MISTER_PASS="${MISTER_PASS:-}"
+if [[ -z "$MISTER_PASS" && -n "${MISTER_PASSWORD:-}" ]]; then
+    MISTER_PASS="$MISTER_PASSWORD"
+fi
 HPS_BINARY_OVERRIDE="${HPS_BINARY_OVERRIDE:-}"
 CORE_RBF_OVERRIDE="${CORE_RBF_OVERRIDE:-}"
 ARM_IF_WRAPPER_BIN_REMOTE="${ARM_IF_WRAPPER_BIN_REMOTE:-/media/fat/rp6502-mister-wrapper}"
@@ -46,7 +49,7 @@ Options:
   --full-deploy    Deploy full wrapper package (not only core/HPS artifacts)
   --host <host>    MiSTer host (default: mister)
   --user <user>    MiSTer user (default: root)
-  --password <p>   MiSTer password (or use MISTER_PASS env)
+    --password <p>   MiSTer password (or use MISTER_PASS / MISTER_PASSWORD env)
     --smoke-arm-if   Run rp6502-mister-wrapper/ctl wait-ready+smoke on MiSTer
   --help           Show this help
 
@@ -74,7 +77,7 @@ run_ssh() {
     local cmd="$1"
     if [[ -n "$MISTER_PASS" ]]; then
         if ! command -v sshpass >/dev/null 2>&1; then
-            echo "error: MISTER_PASS is set but sshpass is not installed" >&2
+            echo "error: password auth requested (MISTER_PASS/MISTER_PASSWORD) but sshpass is not installed" >&2
             exit 1
         fi
         SSHPASS="$MISTER_PASS" sshpass -e ssh -x -o StrictHostKeyChecking=accept-new "${MISTER_USER}@${MISTER_HOST}" "$cmd"
