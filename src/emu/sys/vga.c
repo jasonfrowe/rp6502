@@ -251,11 +251,29 @@ static void render_scanline(int y, uint32_t *fb, bool use_shadow)
     const int canvas_h = use_shadow ? shadow_canvas_h : g_canvas_h;
     const int canvas_w = use_shadow ? shadow_canvas_w : g_canvas_w;
 #if defined(MISTER)
+    const int out_h = 224;
+    int y_start = 0;
+    int y_end = 0;
+
+    if (canvas_h <= out_h)
+    {
+        const int y_pad = (out_h - canvas_h) / 2;
+        y_start = y_pad + y;
+        y_end = y_start + 1;
+    }
+    else
+    {
+        const int y_crop = (canvas_h - out_h) / 2;
+        if (y < y_crop || y >= y_crop + out_h)
+            return;
+        y_start = y - y_crop;
+        y_end = y_start + 1;
+    }
+
     if (ddr_base)
     {
-        int y_start = y * 224 / canvas_h;
-        int y_end = (y + 1) * 224 / canvas_h;
-        if (y_end > 224) y_end = 224;
+        if (y_end > out_h)
+            y_end = out_h;
         if (y_start >= y_end)
             return;
     }
@@ -297,9 +315,8 @@ static void render_scanline(int y, uint32_t *fb, bool use_shadow)
     (void)fb;
     if (ddr_base)
     {
-        int y_start = y * 224 / canvas_h;
-        int y_end = (y + 1) * 224 / canvas_h;
-        if (y_end > 224) y_end = 224;
+        if (y_end > out_h)
+            y_end = out_h;
         if (base < 0)
         {
             // Blank scanline (black)

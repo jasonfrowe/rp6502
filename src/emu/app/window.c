@@ -89,6 +89,8 @@ static void* copy_thread_func(void* arg)
         sem_wait(&sem_copy_start);
         if (copy_thread_exit) break;
 
+        memset(local_fb, 0, sizeof(local_fb));
+
         // 1. Render all scanlines of the frame in parallel on CPU 1
         for (int y = 0; y < shadow_canvas_h; y++)
         {
