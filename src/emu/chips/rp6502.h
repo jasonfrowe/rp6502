@@ -30,6 +30,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "emu/chips/w65c02.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -51,18 +52,32 @@ void ria_reset(void);
 uint8_t ria_reg_read(uint16_t addr);
 void ria_reg_write(uint16_t addr, uint8_t data);
 
-/* One PHI2 tick of the RIA's 6502-bus interface, mirroring via_tick so cpu.c
- * drives both bus peripherals uniformly: when the CPU addresses the RIA window
- * ($FFE0-$FFF9) the register access is performed on the pins, and the RIA's IRQB
- * (VSYNC/SIGINT) is ORed onto the shared IRQ line (additive, after the VIA). */
-uint64_t ria_tick(uint64_t pins);
+extern ria_t ria;
+uint64_t ria_tick_full(uint64_t pins);
+
+static inline bool ria_irq_asserted(void)
+{
+    return (ria.irq_pending & ria.irq_enabled) != 0;
+}
+
+static inline uint64_t ria_tick(uint64_t pins)
+{
+    if (ria_irq_asserted())
+        pins |= M6502_IRQ;
+    uint16_t addr = (uint16_t)(pins & 0xFFFFu);
+    if (__builtin_expect(addr >= 0xFFE0u && addr <= 0xFFF9u, 0))
+    {
+        return ria_tick_full(pins);
+    }
+    ria.PINS = pins;
+    return pins;
+}
+
 void *ria_chip(void); /* ria_t* — the live chip instance, for the debugger UI */
 
 /* RIA $FFF0 interrupt. ria_trigger_vsync latches the VSYNC source (raising IRQB
- * only while the interrupt is enabled); ria_irq_asserted reports whether an
- * enabled source is pending. SIGINT is latched by ria_trigger_sigint, below. */
+ * only while the interrupt is enabled); SIGINT is latched by ria_trigger_sigint, below. */
 void ria_trigger_vsync(void);
-bool ria_irq_asserted(void);
 
 /* Per-frame entry (after the line editor is pumped). The scanline-rate I/O
  * poll is the shared firmware api_task (ria/api/api.h). */

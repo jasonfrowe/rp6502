@@ -30,7 +30,7 @@
  * exactly as via.c wraps its m6522_t (`static m6522_t via;`). The memory-mapped
  * register file (regs[]) and the XSTACK are its dual-ported storage and stay
  * global; ria holds the bus pins + the non-memory-mapped internal latches. */
-static ria_t ria;
+ria_t ria;
 
 /* ------------------------------------------------------------------ */
 /* RIA interrupt ($FFF0): VSYNC (bit7) + SIGINT (bit6)                 */
@@ -62,13 +62,7 @@ void ria_trigger_vsync(void)
     ria_irq_publish();
 }
 
-/* True while an enabled RIA source is pending. cpu.c ORs M6502_IRQ from this
- * after via_tick — purely additive, so the RIA and the VIA share the IRQ line
- * (the VIA owns clearing it; the RIA only ever adds its own assertion). */
-bool ria_irq_asserted(void)
-{
-    return (ria.irq_pending & ria.irq_enabled) != 0;
-}
+
 
 /* $FFEF write. ZXSTACK (0x00) and EXIT (0xFF) run inside the write, mirroring
  * act_loop in ria/sys/ria.c; every other op is latched by the shared api_task,
@@ -242,20 +236,15 @@ uint8_t ria_reg_read(uint16_t addr)
  * still shows IRQB asserted on its own cycle — preserving the prior bus ordering
  * (via_tick -> RIA IRQ OR -> RIA register access -> RAM) exactly, so timing is
  * byte-identical. ria.PINS is stashed for the debug overlay's pin view. */
-uint64_t ria_tick(uint64_t pins)
+uint64_t ria_tick_full(uint64_t pins)
 {
-    if (ria_irq_asserted())
-        pins |= M6502_IRQ;
-    uint16_t addr = M6502_GET_ADDR(pins);
-    if (addr >= RIA_WINDOW_LO && addr <= RIA_WINDOW_HI)
+    uint16_t addr = (uint16_t)(pins & 0xFFFFu);
+    if (pins & M6502_RW)
     {
-        if (pins & M6502_RW)
-        {
-            M6502_SET_DATA(pins, ria_reg_read(addr)); /* braces: the macro is a {block} */
-        }
-        else
-            ria_reg_write(addr, M6502_GET_DATA(pins));
+        M6502_SET_DATA(pins, ria_reg_read(addr)); /* braces: the macro is a {block} */
     }
+    else
+        ria_reg_write(addr, M6502_GET_DATA(pins));
     ria.PINS = pins;
     return pins;
 }

@@ -494,9 +494,15 @@ static void mister_input_update(void)
 
 
 
+extern uint16_t local_fb[384 * 224];
+#define NV_BUF0_OFFSET      0x00000100u
+#define NV_BUF1_OFFSET      0x0002A200u
+
 static void swap_frame_mister(void)
 {
     if (!ddr_base) return;
+    uint8_t* dst_mem = (uint8_t*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
+    memcpy(dst_mem, local_fb, 384 * 224 * 2);
     frame_counter++;
     volatile uint32_t* ctrl = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
     *ctrl = (frame_counter << 2) | (active_buf & 1);
@@ -576,15 +582,18 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
 
         if (stats_frames >= 60)
         {
-            printf("rp6502-emu stats (ms/frame): cpu=%.2f vga=%.2f audio=%.2f input=%.2f video=%.2f total=%.2f\n",
-                (double)g_cpu_time_ns / stats_frames / 1000000.0,
-                (double)g_vga_time_ns / stats_frames / 1000000.0,
-                (double)total_audio_ns / stats_frames / 1000000.0,
-                (double)total_input_ns / stats_frames / 1000000.0,
-                (double)total_video_ns / stats_frames / 1000000.0,
-                (double)(g_cpu_time_ns + g_vga_time_ns + total_audio_ns + total_input_ns + total_video_ns) / stats_frames / 1000000.0);
+            double true_total = (double)total_emu_ns / stats_frames / 1000000.0;
+            double cpu_ms = (double)g_cpu_time_ns / stats_frames / 1000000.0;
+            double vga_ms = (double)g_vga_time_ns / stats_frames / 1000000.0;
+            double audio_ms = (double)total_audio_ns / stats_frames / 1000000.0;
+            double input_ms = (double)total_input_ns / stats_frames / 1000000.0;
+            double video_ms = (double)total_video_ns / stats_frames / 1000000.0;
+            double overhead_ms = true_total - cpu_ms - vga_ms;
+            printf("rp6502-emu stats (ms/frame): cpu=%.2f vga=%.2f audio=%.2f input=%.2f video=%.2f overhead=%.2f total=%.2f (phi2=%d)\n",
+                cpu_ms, vga_ms, audio_ms, input_ms, video_ms, overhead_ms, true_total, cpu_get_phi2_khz_run());
             g_cpu_time_ns = 0;
             g_vga_time_ns = 0;
+            total_emu_ns = 0;
             total_audio_ns = 0;
             total_input_ns = 0;
             total_video_ns = 0;

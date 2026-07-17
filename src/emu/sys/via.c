@@ -11,7 +11,7 @@
 #include "emu/sys/via.h"
 
 static m6522_t via;
-static bool via_active = false;
+bool via_active = false;
 
 void via_reset(void)
 {
@@ -22,7 +22,7 @@ void via_reset(void)
 /* The live 6522 instance, for the debugger UI. */
 void *via_chip(void) { return &via; }
 
-uint64_t via_tick(uint64_t pins)
+uint64_t via_tick_full(uint64_t pins)
 {
     uint16_t addr = (uint16_t)(pins & 0xFFFFu);
     if (addr >= VIA_WINDOW_LO && addr <= VIA_WINDOW_HI) {

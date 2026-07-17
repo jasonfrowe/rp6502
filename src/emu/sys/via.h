@@ -21,7 +21,15 @@ void via_reset(void);
 /* One PHI2 tick: counts the timers and, when the CPU addresses $FFD0-$FFDF,
  * performs the register access. pins is the CPU pin mask; the returned mask
  * carries read data and the IRQ line (shared bit with M6502_IRQ). */
-uint64_t via_tick(uint64_t pins);
+extern bool via_active;
+uint64_t via_tick_full(uint64_t pins);
+
+static inline uint64_t via_tick(uint64_t pins)
+{
+    if (__builtin_expect(!via_active, 1))
+        return pins;
+    return via_tick_full(pins);
+}
 
 /* The live chip instance (m6522_t*), for the debugger UI + DAP register access. */
 void *via_chip(void);
