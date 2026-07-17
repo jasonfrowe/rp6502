@@ -42,6 +42,11 @@ static int16_t g_highest_scanline;
 
 /* RGB555(+alpha bit) -> RGBA8 (0xAABBGGRR) lookup. */
 static uint32_t g_lut[0x10000];
+uint16_t g_lut_rgb565[0x10000];
+
+volatile uint8_t *ddr_base = NULL;
+int active_buf = 0;
+uint16_t local_fb[384 * 224];
 
 static void build_lut(void)
 {
@@ -52,6 +57,7 @@ static void build_lut(void)
         uint32_t g = (uint32_t)((g5 << 3) | (g5 >> 2));
         uint32_t b = (uint32_t)((b5 << 3) | (b5 >> 2));
         g_lut[p] = r | (g << 8) | (b << 16) | 0xFF000000u;
+        g_lut_rgb565[p] = (r5 << 11) | (((g5 << 1) | (g5 >> 4)) << 5) | b5;
     }
 }
 
@@ -224,6 +230,11 @@ void vga_set_framebuffer(uint32_t *fb)
  * composited bottom-to-top — the lowest is the opaque base and higher planes
  * overlay where their pixel's alpha bit is set, so e.g. a sprite layer shows
  * through the transparent background of a text layer above it. */
+#if defined(MISTER)
+#define NV_BUF0_OFFSET      0x00000100u
+#define NV_BUF1_OFFSET      0x0002A200u
+#endif
+
 static void render_scanline(int y, uint32_t *fb)
 {
     const int W = g_canvas_w;
@@ -251,7 +262,6 @@ static void render_scanline(int y, uint32_t *fb)
         }
     }
 
-    uint32_t *dst = fb + (size_t)y * W;
     int base = -1;
     for (int i = 0; i < SCANVIDEO_PLANE_COUNT; i++)
         if (filled[i])
@@ -259,6 +269,52 @@ static void render_scanline(int y, uint32_t *fb)
             base = i;
             break;
         }
+
+#if defined(MISTER)
+    (void)fb;
+    if (ddr_base)
+    {
+        uint8_t* dst_mem = (uint8_t*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
+        int y_start = y * 224 / g_canvas_h;
+        int y_end = (y + 1) * 224 / g_canvas_h;
+        if (y_end > 224) y_end = 224;
+        if (y_start < y_end)
+        {
+            if (base < 0)
+            {
+                // Blank scanline (black)
+                for (int dst_y = y_start; dst_y < y_end; dst_y++)
+                {
+                    uint16_t *dst_row = local_fb + dst_y * 384;
+                    memset(dst_row, 0, 384 * 2);
+                    memcpy((void*)(dst_mem + dst_y * 384 * 2), dst_row, 384 * 2);
+                }
+                return;
+            }
+            uint32_t x_step_16 = (W << 16) / 384;
+            for (int dst_y = y_start; dst_y < y_end; dst_y++)
+            {
+                uint16_t *dst_row = local_fb + dst_y * 384;
+                uint32_t x_accum_16 = 0;
+                for (int x = 0; x < 384; x++)
+                {
+                    int src_x = x_accum_16 >> 16;
+                    x_accum_16 += x_step_16;
+                    
+                    uint16_t px = plane[base][src_x];
+                    for (int i = base + 1; i < SCANVIDEO_PLANE_COUNT; i++)
+                        if (filled[i] && (plane[i][src_x] & SCANVIDEO_ALPHA_MASK))
+                            px = plane[i][src_x];
+                    dst_row[x] = g_lut_rgb565[px];
+                }
+                memcpy((void*)(dst_mem + dst_y * 384 * 2), dst_row, 384 * 2);
+            }
+        }
+        return;
+    }
+#endif
+
+    uint32_t *dst = fb + (size_t)y * W;
     if (base < 0)
     {
         for (int x = 0; x < W; x++)

@@ -17,6 +17,7 @@
 #include "emu/main.h"
 #include "emu/plat.h"
 #include "emu/sys/vga.h"
+#include <stdio.h>
 
 #ifndef EMU_WITH_SOKOL
 
@@ -49,10 +50,10 @@
 #define NV_FRAME_BYTES      (384 * 224 * 2)  // 172,032
 
 static int mem_fd = -1;
-static volatile uint8_t* ddr_base = NULL;
+extern volatile uint8_t* ddr_base;
 static uint32_t frame_counter = 0;
-static int active_buf = 0;
-static uint16_t local_fb[384 * 224];
+extern int active_buf;
+extern uint16_t local_fb[];
 static uint32_t *g_fb = NULL;
 
 extern uint64_t g_vga_time_ns;
@@ -491,42 +492,7 @@ static void mister_input_update(void)
     }
 }
 
-void mister_write_scanline(int line)
-{
-    if (!ddr_base || !g_fb) return;
 
-    int cw, ch;
-    vga_canvas_size(&cw, &ch);
-
-    // Map this source line to target line(s)
-    int y_start = line * 224 / ch;
-    int y_end = (line + 1) * 224 / ch;
-    if (y_end > 224) y_end = 224;
-    if (y_start >= y_end) return;
-
-    uint8_t* dst = (uint8_t*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
-    const uint32_t *src_row = g_fb + line * cw;
-    uint32_t x_step_16 = (cw << 16) / 384;
-
-    for (int y = y_start; y < y_end; y++)
-    {
-        uint16_t *dst_row = local_fb + y * 384;
-        uint32_t x_accum_16 = 0;
-        for (int x = 0; x < 384; x++)
-        {
-            int src_x = x_accum_16 >> 16;
-            x_accum_16 += x_step_16;
-            
-            uint32_t pixel = src_row[src_x];
-            uint16_t r5 = (pixel & 0xF8u) << 8;
-            uint16_t g6 = (pixel & 0xFC00u) >> 5;
-            uint16_t b5 = (pixel & 0xF80000u) >> 19;
-            dst_row[x] = r5 | g6 | b5;
-        }
-        // Burst copy the completed scanline to uncacheable physical memory
-        memcpy((void*)(dst + y * 384 * 2), dst_row, 384 * 2);
-    }
-}
 
 static void swap_frame_mister(void)
 {
@@ -559,8 +525,6 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
     }
 
     mister_input_init();
-    extern void (*mister_write_scanline_cb)(int line);
-    mister_write_scanline_cb = mister_write_scanline;
 
 #if defined(EMU_WITH_AUDIO)
     saudio_setup(&(saudio_desc){
