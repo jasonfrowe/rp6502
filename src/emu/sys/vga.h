@@ -33,7 +33,9 @@ int vga_vsync_scanline(void);
  * 0xAABBGGRR, canvas-native stride). Interleaved with the CPU between scanlines
  * so mid-frame state changes land on later lines (raster effects), matching
  * real per-scanline scanout. */
-void vga_render_scanline(int y);
+void vga_render_scanline(int y, bool use_shadow);
+void vga_prepare_shadow_prog(void);
+extern int shadow_canvas_h;
 void vga_canvas_size(int *w, int *h);
 
 /* The largest canvas (the 640x480 boot console); framebuffer owners size

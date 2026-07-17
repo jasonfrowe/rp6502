@@ -235,21 +235,34 @@ void vga_set_framebuffer(uint32_t *fb)
 #define NV_BUF1_OFFSET      0x0002A200u
 #endif
 
-static void render_scanline(int y, uint32_t *fb)
+vga_prog_t shadow_g_prog[VGA_PROG_MAX];
+int shadow_canvas_w = VGA_MAX_WIDTH;
+int shadow_canvas_h = VGA_MAX_HEIGHT;
+
+void vga_prepare_shadow_prog(void)
 {
+    memcpy(shadow_g_prog, g_prog, sizeof(g_prog));
+    shadow_canvas_w = g_canvas_w;
+    shadow_canvas_h = g_canvas_h;
+}
+
+static void render_scanline(int y, uint32_t *fb, bool use_shadow)
+{
+    const int canvas_h = use_shadow ? shadow_canvas_h : g_canvas_h;
+    const int canvas_w = use_shadow ? shadow_canvas_w : g_canvas_w;
 #if defined(MISTER)
     if (ddr_base)
     {
-        int y_start = y * 224 / g_canvas_h;
-        int y_end = (y + 1) * 224 / g_canvas_h;
+        int y_start = y * 224 / canvas_h;
+        int y_end = (y + 1) * 224 / canvas_h;
         if (y_end > 224) y_end = 224;
         if (y_start >= y_end)
             return;
     }
 #endif
-    const int W = g_canvas_w;
+    const int W = canvas_w;
     uint16_t plane[SCANVIDEO_PLANE_COUNT][VGA_MAX_WIDTH];
-    const vga_prog_t *p = &g_prog[y];
+    const vga_prog_t *p = use_shadow ? &shadow_g_prog[y] : &g_prog[y];
     bool filled[SCANVIDEO_PLANE_COUNT] = {false, false, false};
     uint16_t *foreground = NULL;
     for (int i = 0; i < SCANVIDEO_PLANE_COUNT; i++)
@@ -284,8 +297,8 @@ static void render_scanline(int y, uint32_t *fb)
     (void)fb;
     if (ddr_base)
     {
-        int y_start = y * 224 / g_canvas_h;
-        int y_end = (y + 1) * 224 / g_canvas_h;
+        int y_start = y * 224 / canvas_h;
+        int y_end = (y + 1) * 224 / canvas_h;
         if (y_end > 224) y_end = 224;
         if (base < 0)
         {
@@ -308,16 +321,52 @@ static void render_scanline(int y, uint32_t *fb)
             temp_row[x] = g_lut_rgb565[px];
         }
         // Scaling and burst copy loop
-        uint32_t x_step_16 = (W << 16) / 384;
-        for (int dst_y = y_start; dst_y < y_end; dst_y++)
+        if (W == 320)
         {
-            uint16_t *dst_row = local_fb + dst_y * 384;
-            uint32_t x_accum_16 = 0;
-            for (int x = 0; x < 384; x++)
+            for (int dst_y = y_start; dst_y < y_end; dst_y++)
             {
-                int src_x = x_accum_16 >> 16;
-                x_accum_16 += x_step_16;
-                dst_row[x] = temp_row[src_x];
+                uint16_t *dst_row = local_fb + dst_y * 384;
+                const uint16_t *src_row = temp_row;
+                for (int x = 0; x < 384; x += 6)
+                {
+                    dst_row[x + 0] = src_row[0];
+                    dst_row[x + 1] = src_row[0];
+                    dst_row[x + 2] = src_row[1];
+                    dst_row[x + 3] = src_row[2];
+                    dst_row[x + 4] = src_row[3];
+                    dst_row[x + 5] = src_row[4];
+                    src_row += 5;
+                }
+            }
+        }
+        else if (W == 640)
+        {
+            for (int dst_y = y_start; dst_y < y_end; dst_y++)
+            {
+                uint16_t *dst_row = local_fb + dst_y * 384;
+                const uint16_t *src_row = temp_row;
+                for (int x = 0; x < 384; x += 3)
+                {
+                    dst_row[x + 0] = src_row[0];
+                    dst_row[x + 1] = src_row[1];
+                    dst_row[x + 2] = src_row[3];
+                    src_row += 5;
+                }
+            }
+        }
+        else
+        {
+            uint32_t x_step_16 = ((uint32_t)W << 16) / 384;
+            for (int dst_y = y_start; dst_y < y_end; dst_y++)
+            {
+                uint16_t *dst_row = local_fb + dst_y * 384;
+                uint32_t x_accum_16 = 0;
+                for (int x = 0; x < 384; x++)
+                {
+                    int src_x = (int)(x_accum_16 >> 16);
+                    x_accum_16 += x_step_16;
+                    dst_row[x] = temp_row[src_x];
+                }
             }
         }
         return;
@@ -344,8 +393,8 @@ static void render_scanline(int y, uint32_t *fb)
 /* Render scanline y of the current frame into the registered framebuffer,
  * interleaved with the CPU by main_run_frame so mid-frame state changes land on
  * later lines (raster effects), matching the real per-scanline VGA scanout. */
-void vga_render_scanline(int y)
+void vga_render_scanline(int y, bool use_shadow)
 {
     if (g_framebuffer)
-        render_scanline(y, g_framebuffer);
+        render_scanline(y, g_framebuffer, use_shadow);
 }

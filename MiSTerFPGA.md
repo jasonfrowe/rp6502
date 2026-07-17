@@ -103,3 +103,61 @@ During the launch handoff:
 
 ### CPU Performance Timing
 The emulator cycle tick loop is highly cycle-accurate, causing the single-core CPU usage on the dual-core Cortex-A9 to run flat out. Timings are output to `/media/fat/games/3s-arm/logs/last-run.log` every second to measure frame performance (e.g. `cpu`, `vga` render, `video` DDR3 copy, `audio` synth).
+
+---
+
+## 5. Optimization & Performance Tuning (8 MHz 60 FPS)
+
+During porting, the Cyclone V HPS (dual-core 32-bit Cortex-A9 from 2007) encountered VSYNC dropouts (dropping to exactly 30 FPS due to the "VSYNC cliff") when emulating the W65C02 CPU at its full **8 MHz** clock speed. 
+
+We applied several critical optimizations to achieve a stable, rock-solid **60 FPS** at the target 8 MHz CPU clock:
+
+### Architectural & Compiler Optimizations
+1. **Parallel VGA Scanline Rendering (Asynchronous Core Handoff)**:
+   * By default, VGA scanline compositing took ~5.3 ms of the main loop. 
+   * We offloaded the entire video pipeline (VGA scanline rendering, compositing, DDR3 frame copying, and FPGA buffer swapping) to the second HPS core (**CPU 1**).
+   * At the end of a frame, the main thread copies the active scanline programs (`g_prog`) to a 20 KB shadow buffer (`shadow_g_prog`). The background thread on CPU 1 renders the frame in parallel while the main emulator thread on CPU 0 immediately begins executing CPU cycles for the next frame.
+   * This dropped the main thread's VGA compositing overhead from **5.3 ms to 0.0 ms**.
+2. **Double-Buffered Asynchronous DDR3 Frame Copies**:
+   * Removed all uncached memory writes (small 768-byte copies) directly to `/dev/mem` from the scanline loop, routing them into cached RAM.
+   * Frame copies to DDR3 are handled in a single highly-optimized 172 KB burst copy on CPU 1, avoiding memory transaction stalls on CPU 0.
+3. **CPU Core Affinity Pinning**:
+   * Pinned the main emulator thread to **CPU 0** and the background rendering/copy thread to **CPU 1** using `pthread_setaffinity_np`. This isolates the timing-sensitive cycle execution loop from OS context switches, cache invalidation, and interference from other system processes (like the main `MiSTer` binary).
+4. **32-Bit Hot-Loop Optimization (Cortex-A9 64-bit Math Bypass)**:
+   * Since the Cortex-A9 is a 32-bit CPU, 64-bit comparisons and timing additions in the loop condition (`clock_8 < deadline_8` and `clock_8 += step_8`) were causing significant register pressure and stack spilling.
+   * We optimized `run_until` to compute the required cycle steps upfront as a 32-bit integer, running the hot loop as a simple 32-bit decrement-and-branch loop.
+   * Replaced 64-bit divisions (`n * 4096000ull / 63`) on the scanline boundary with a precalculated O(1) table lookup (`scanline_deadlines[528]`).
+   * Explicitly cast `pins` to `uint32_t` and `uint16_t` for address extraction and status checking in `cpu_tick_fast()`, ensuring all shifts, masks, and tests compile to fast, single-cycle 32-bit instructions.
+5. **Cached Interrupt Assertions**:
+   * Cached the level-triggered `ria_irq_asserted()` check into a global boolean variable (`ria_irq_asserted_cached`) updated only when the IRQ registers actually change, avoiding redundant memory structure accesses on every single clock cycle.
+6. **Compiler Optimizations**:
+   * Passed aggressive `-Ofast -funroll-loops` targeting the Cortex-A9 FPU/NEON pipeline (`-mcpu=cortex-a9 -mfpu=neon`) in `src/emu/CMakeLists.txt`.
+
+### Resulting Timing Metrics (8 MHz)
+* **VGA Compositing**: 0.00 ms (Main Thread) / ~5.3 ms (CPU 1)
+* **Video DDR3 Copy**: 0.02 ms (Main Thread) / ~2.0 ms (CPU 1)
+* **CPU Cycle Emulation**: ~17.3 ms (under active SSH logging) / **~13.8 ms** (natively)
+* **Native Frame Duration**: **~14.8 ms** (comfortably under the 16.6 ms VSYNC deadline, yielding a solid 60 FPS)
+
+---
+
+## 6. Build & Compilation Toolchain Reference
+
+### Toolchain Details
+* **Cross-Compiler**: ARM GNU Toolchain (`arm-none-linux-gnueabihf`) version 13.2.Rel1.
+* **Build System**: CMake (configured in `src/emu/CMakeLists.txt`).
+
+### Step-by-Step Compilation Commands
+```bash
+# 1. Export path to your toolchain binaries
+export PATH="/home/rowe/opt/arm-gnu-toolchain-13.2.Rel1-x86_64-arm-none-linux-gnueabihf/bin/:$PATH"
+
+# 2. Clean previous build folders (optional)
+rm -rf build-mister
+
+# 3. Configure the CMake project for MiSTer target cross-compilation
+cmake -S src/emu -B build-mister -DCMAKE_BUILD_TYPE=Release -DMISTER=ON
+
+# 4. Build the emulator target with parallel compilation
+cmake --build build-mister --parallel 4
+```

@@ -45,9 +45,12 @@ ria_t ria;
  * (offset 0x10) sits just past the API trampoline window, so it is its own
  * register, not RAM. */
 /* Keep $FFF0's readback byte in step with the live pending flags. */
+bool ria_irq_asserted_cached = false;
+
 static void ria_irq_publish(void)
 {
     regs[0x10] = ria.irq_pending;
+    ria_irq_asserted_cached = (ria.irq_pending & ria.irq_enabled) != 0;
 }
 
 void ria_trigger_sigint(void)
@@ -245,7 +248,9 @@ uint64_t ria_tick_full(uint64_t pins)
     }
     else
         ria_reg_write(addr, M6502_GET_DATA(pins));
+#if !defined(MISTER)
     ria.PINS = pins;
+#endif
     return pins;
 }
 
@@ -311,6 +316,7 @@ void ria_reset(void)
     api_stop(); /* drop any latched op from the outgoing program */
     ria.irq_enabled = 0; /* $FFF0: IRQ disabled, no pending sources, line idle */
     ria.irq_pending = 0;
+    ria_irq_asserted_cached = false;
     regs[0x10] = 0;
     xstack[XSTACK_SIZE] = 0; /* cstring guard */
     cpu_set_halted(false);

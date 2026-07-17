@@ -56,8 +56,108 @@ void main_set_exit_code(int code) { s_exit_code = code; }
 unsigned long main_frame_count(void) { return s_frame_count; }
 uint64_t main_clock_8(void) { return master_8; }
 
+static void init_scanline_deadlines(void);
+
+#if defined(MISTER)
+#include <fcntl.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <sys/stat.h>
+
+static bool sysfs_write(const char *path, const char *value)
+{
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) return false;
+    size_t len = strlen(value);
+    ssize_t written = write(fd, value, len);
+    close(fd);
+    return written == (ssize_t)len;
+}
+
+static bool sysfs_read(const char *path, char *buf, size_t buf_size)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return false;
+    ssize_t n = read(fd, buf, buf_size - 1);
+    close(fd);
+    if (n <= 0) return false;
+    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == ' ')) n--;
+    buf[n] = '\0';
+    return true;
+}
+
+static void mister_apply_cpu_clock(void)
+{
+    const char *config_path = "/media/fat/games/3s-arm/config";
+    FILE *f = fopen(config_path, "r");
+    if (!f) return;
+
+    char line[256];
+    const char *freq = "800000"; // default to stock
+    while (fgets(line, sizeof(line), f))
+    {
+        char *ptr = line;
+        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
+        if (*ptr == '#') continue;
+        
+        char *eq = strchr(ptr, '=');
+        if (eq)
+        {
+            *eq = '\0';
+            char *key = ptr;
+            char *val = eq + 1;
+            
+            // Trim key
+            char *key_end = key + strlen(key);
+            while (key_end > key && isspace((unsigned char)key_end[-1])) key_end--;
+            *key_end = '\0';
+            
+            if (strcmp(key, "arm-clock") == 0)
+            {
+                // Trim val
+                while (*val && isspace((unsigned char)*val)) val++;
+                char *val_end = val + strlen(val);
+                while (val_end > val && isspace((unsigned char)val_end[-1])) val_end--;
+                *val_end = '\0';
+                
+                if (strcmp(val, "1000") == 0) freq = "1000000";
+                else if (strcmp(val, "1200") == 0) freq = "1200000";
+                break;
+            }
+        }
+    }
+    fclose(f);
+
+    printf("rp6502-emu: applying ARM CPU frequency %s kHz\n", freq);
+
+    // Set Governor to performance
+    sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance");
+
+    // Write target clock frequency
+    char cur_max[32] = {0};
+    bool have_cur = sysfs_read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", cur_max, sizeof(cur_max));
+    long target = strtol(freq, NULL, 10);
+    long current = have_cur ? strtol(cur_max, NULL, 10) : 0;
+
+    if (target >= current)
+    {
+        sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", freq);
+        sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", freq);
+    }
+    else
+    {
+        sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", freq);
+        sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", freq);
+    }
+}
+#endif
+
 void main_init(void)
 {
+#if defined(MISTER)
+    mister_apply_cpu_clock();
+#endif
+    init_scanline_deadlines();
     pro_init();
     cpu_init(); /* default PHI2 (--phi2 reapplies after main_init) */
     master_8 = 0;
@@ -76,16 +176,20 @@ void main_init(void)
 /* Run engine                                                          */
 /* ------------------------------------------------------------------ */
 
-/* Deadline (1/8-tick units) at which scanline n is due:
- *   n * (8 * 256e6 sub/s) / (60*525 scanline/s) = n * 4096000 / 63  (reduced).
- * Computed from the ABSOLUTE scanline number every time — never accumulated —
- * so the integer division introduces NO drift: it is exact at every frame
- * boundary (n a multiple of 525, since 31500/63 = 500). Do NOT "fix" the
- * non-exact 4096000/63 by tracking a per-scanline remainder; that would
- * double-correct and create real drift. The n*4096000 intermediate overflows
- * uint64 ~4.5 years of uptime (well before master_8 itself), still unreachable. */
+static uint64_t scanline_deadlines[528];
+
+static void init_scanline_deadlines(void)
+{
+    for (int i = 0; i < 528; i++)
+    {
+        scanline_deadlines[i] = (uint64_t)i * 4096000ull / 63;
+    }
+}
+
 static uint64_t scanline_deadline_8(uint64_t n)
 {
+    if (__builtin_expect(n < 528, 1))
+        return scanline_deadlines[n];
     return n * 4096000ull / 63;
 }
 
@@ -99,23 +203,40 @@ static bool run_until(uint64_t deadline_8, bool dbg)
      * else reads the clock mid-scanline, so this keeps the hot loop off the static. */
     uint64_t clock_8 = master_8;
     const uint32_t step_8 = cpu_step_8();
-    while (clock_8 < deadline_8 && cpu_active())
+    if (__builtin_expect(dbg || dbg_watch_armed, 0))
     {
-        uint64_t pins = cpu_tick();
-        clock_8 += step_8;
-        if (dbg)
+        while (clock_8 < deadline_8 && cpu_active())
         {
+            uint64_t local_pins = cpu_tick();
+            clock_8 += step_8;
             if (cpu_dbg_cycle_cb)
-                cpu_dbg_cycle_cb(pins);
+                cpu_dbg_cycle_cb(local_pins);
             /* Stop before the fetched instruction's effect runs; the partial
              * frame is then abandoned and the machine holds until resume. */
             uint16_t pc;
             uint8_t sp;
-            if (cpu_opcode_fetch(pins, &pc, &sp) && dbg_at_instruction(pc, sp))
+            if (cpu_opcode_fetch(local_pins, &pc, &sp) && dbg_at_instruction(pc, sp))
             {
                 master_8 = clock_8; /* commit before abandoning the frame */
                 return true;
             }
+        }
+    }
+    else
+    {
+        int32_t cycles = (int32_t)((deadline_8 - clock_8) / step_8);
+        if (cycles > 0)
+        {
+            for (int32_t i = 0; i < cycles; i++)
+            {
+                if (__builtin_expect(!cpu_active(), 0))
+                {
+                    cycles = i;
+                    break;
+                }
+                (void)cpu_tick_fast();
+            }
+            clock_8 += (uint64_t)cycles * step_8;
         }
     }
     if (clock_8 < deadline_8)
@@ -155,7 +276,7 @@ bool main_run_scanline(bool render)
         {
             const int h = vga_canvas_height();
             for (int line = 0; line < h; line++)
-                vga_render_scanline(line);
+                vga_render_scanline(line, false);
             stop_swept = true;
         }
         return true;
@@ -180,7 +301,7 @@ bool main_run_scanline(bool render)
     if (render && s_run_line < canvas_h)
     {
         uint64_t v0 = os_mono_ns();
-        vga_render_scanline(s_run_line);
+        vga_render_scanline(s_run_line, false);
         uint64_t v1 = os_mono_ns();
         g_vga_time_ns += (v1 - v0);
 

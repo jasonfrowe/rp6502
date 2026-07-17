@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 /*
  * Copyright (c) 2026 Rumbledethumps
  *
@@ -53,8 +54,57 @@ static int mem_fd = -1;
 extern volatile uint8_t* ddr_base;
 static uint32_t frame_counter = 0;
 extern int active_buf;
-extern uint16_t local_fb[];
+extern uint16_t local_fb[384 * 224];
 static uint32_t *g_fb = NULL;
+
+#include <pthread.h>
+#include <semaphore.h>
+
+static pthread_t copy_thread;
+static sem_t sem_copy_start;
+static sem_t sem_copy_done;
+static bool copy_thread_running = false;
+static volatile bool copy_thread_exit = false;
+
+static const void* copy_src;
+static void* copy_dst;
+static size_t copy_size;
+static volatile uint32_t* copy_ctrl_reg;
+static uint32_t copy_ctrl_val;
+
+static void* copy_thread_func(void* arg)
+{
+    (void)arg;
+#if defined(MISTER)
+    // Pin copy thread to CPU 1
+    {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(1, &cpuset);
+        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+    }
+#endif
+    while (!copy_thread_exit)
+    {
+        sem_wait(&sem_copy_start);
+        if (copy_thread_exit) break;
+
+        // 1. Render all scanlines of the frame in parallel on CPU 1
+        for (int y = 0; y < shadow_canvas_h; y++)
+        {
+            vga_render_scanline(y, true);
+        }
+
+        // 2. Burst-copy the rendered frame buffer to DDR3
+        memcpy(copy_dst, copy_src, copy_size);
+
+        // 3. Swap display buffers on the FPGA
+        *copy_ctrl_reg = copy_ctrl_val;
+
+        sem_post(&sem_copy_done);
+    }
+    return NULL;
+}
 
 extern uint64_t g_vga_time_ns;
 extern uint64_t g_cpu_time_ns;
@@ -494,19 +544,31 @@ static void mister_input_update(void)
 
 
 
-extern uint16_t local_fb[384 * 224];
-#define NV_BUF0_OFFSET      0x00000100u
-#define NV_BUF1_OFFSET      0x0002A200u
+
 
 static void swap_frame_mister(void)
 {
     if (!ddr_base) return;
-    uint8_t* dst_mem = (uint8_t*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
-    memcpy(dst_mem, local_fb, 384 * 224 * 2);
-    frame_counter++;
-    volatile uint32_t* ctrl = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
-    *ctrl = (frame_counter << 2) | (active_buf & 1);
+
+    // 1. Wait for previous asynchronous render/copy to complete
+    sem_wait(&sem_copy_done);
+
+    // 2. Prepare the shadow program and canvas geometry
+    vga_prepare_shadow_prog();
+
+    // 3. Setup next copy parameters (we copy from local_fb)
+    copy_src = local_fb;
+    copy_dst = (void*)(ddr_base + (active_buf ? NV_BUF1_OFFSET : NV_BUF0_OFFSET));
+    copy_size = NV_FRAME_BYTES;
+    copy_ctrl_reg = (volatile uint32_t*)(ddr_base + NV_CTRL_OFFSET);
+    copy_ctrl_val = (frame_counter << 2) | (active_buf & 1);
+
+    // 4. Update the active buffer on the FPGA and increment counter for the NEXT frame
     active_buf ^= 1;
+    frame_counter++;
+
+    // 5. Trigger the background render/copy thread
+    sem_post(&sem_copy_start);
 }
 
 int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exit_on_halt)
@@ -524,6 +586,16 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
     setenv("ALSA_CONFIG_PATH", "/usr/share/alsa/alsa.conf", 1);
 #endif
 
+#if defined(MISTER)
+    // Pin main thread to CPU 0
+    {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(0, &cpuset);
+        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+    }
+#endif
+
     if (!mister_video_init())
     {
         fprintf(stderr, "rp6502-emu: failed to initialize MiSTer video\n");
@@ -531,6 +603,12 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
     }
 
     mister_input_init();
+
+    sem_init(&sem_copy_start, 0, 0);
+    sem_init(&sem_copy_done, 0, 1); // initially done (available)
+    copy_thread_exit = false;
+    pthread_create(&copy_thread, NULL, copy_thread_func, NULL);
+    copy_thread_running = true;
 
 #if defined(EMU_WITH_AUDIO)
     saudio_setup(&(saudio_desc){
@@ -555,7 +633,7 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
 
         uint64_t t0 = os_mono_ns();
         g_fb = fb;
-        while (!main_run_scanline(true))
+        while (!main_run_scanline(false))
             ;
         uint64_t t1 = os_mono_ns();
 #if defined(EMU_WITH_AUDIO)
@@ -609,6 +687,17 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
 #endif
     mister_input_shutdown();
     mister_video_shutdown();
+
+    if (copy_thread_running)
+    {
+        copy_thread_exit = true;
+        sem_post(&sem_copy_start);
+        pthread_join(copy_thread, NULL);
+        sem_destroy(&sem_copy_start);
+        sem_destroy(&sem_copy_done);
+        copy_thread_running = false;
+    }
+
     return main_exit_code();
 }
 

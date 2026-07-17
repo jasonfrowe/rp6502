@@ -68,6 +68,33 @@ static inline uint64_t cpu_tick(void)
     return pins;
 }
 
+static inline uint64_t cpu_tick_fast(void)
+{
+    pins = m6502_tick(&cpu, pins);
+    if (__builtin_expect(via_active, 0))
+        pins = via_tick_full(pins);
+    if (__builtin_expect(ria_irq_asserted_cached, 0))
+        pins |= M6502_IRQ;
+    uint16_t addr = (uint16_t)pins;
+    if (__builtin_expect(addr >= VIA_WINDOW_LO && addr <= RIA_WINDOW_HI, 0))
+    {
+        if (addr >= 0xFFE0u)
+            pins = ria_tick_full(pins);
+    }
+    else
+    {
+        if ((uint32_t)pins & (uint32_t)M6502_RW)
+        {
+            pins = (pins & 0xFFFFFFFFFF00FFFFull) | (((uint64_t)ram[addr]) << 16);
+        }
+        else
+        {
+            ram[addr] = (uint8_t)((uint32_t)pins >> 16);
+        }
+    }
+    return pins;
+}
+
 uint32_t cpu_step_8(void); /* 1/8-tick units advanced per 6502 cycle */
 
 /* True on an opcode fetch (SYNC); out-writes the fetch PC and SP. */

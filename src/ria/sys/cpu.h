@@ -22,7 +22,7 @@
 
 #define CPU_PHI2_MIN_KHZ 100
 #define CPU_PHI2_MAX_KHZ 8000
-#define CPU_PHI2_DEFAULT 4000
+#define CPU_PHI2_DEFAULT 8000
 
 void cpu_init(void);
 

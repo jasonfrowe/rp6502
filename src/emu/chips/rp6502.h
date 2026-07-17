@@ -55,9 +55,10 @@ void ria_reg_write(uint16_t addr, uint8_t data);
 extern ria_t ria;
 uint64_t ria_tick_full(uint64_t pins);
 
+extern bool ria_irq_asserted_cached;
 static inline bool ria_irq_asserted(void)
 {
-    return (ria.irq_pending & ria.irq_enabled) != 0;
+    return ria_irq_asserted_cached;
 }
 
 static inline uint64_t ria_tick(uint64_t pins)
@@ -69,7 +70,9 @@ static inline uint64_t ria_tick(uint64_t pins)
     {
         return ria_tick_full(pins);
     }
+#if !defined(MISTER)
     ria.PINS = pins;
+#endif
     return pins;
 }
 
