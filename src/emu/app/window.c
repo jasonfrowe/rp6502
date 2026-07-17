@@ -510,7 +510,7 @@ void mister_write_scanline(int line)
 
     for (int y = y_start; y < y_end; y++)
     {
-        uint16_t *dst_row = (uint16_t*)(dst + y * 384 * 2);
+        uint16_t *dst_row = local_fb + y * 384;
         uint32_t x_accum_16 = 0;
         for (int x = 0; x < 384; x++)
         {
@@ -523,6 +523,8 @@ void mister_write_scanline(int line)
             uint16_t b5 = (pixel & 0xF80000u) >> 19;
             dst_row[x] = r5 | g6 | b5;
         }
+        // Burst copy the completed scanline to uncacheable physical memory
+        memcpy((void*)(dst + y * 384 * 2), dst_row, 384 * 2);
     }
 }
 
