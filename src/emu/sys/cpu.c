@@ -65,9 +65,9 @@ static inline uint64_t bus_cycle(uint64_t p)
     uint16_t addr = M6502_GET_ADDR(p);
     /* The RIA ($FFE0-$FFF9) and VIA ($FFD0-$FFDF) windows are already serviced on
      * the pins by ria_tick / via_tick (data is on the pins for a read; a write was
-     * consumed) — leave them alone here, this branch only backs RAM. */
-    if ((addr >= RIA_WINDOW_LO && addr <= RIA_WINDOW_HI) ||
-        (addr >= VIA_WINDOW_LO && addr <= VIA_WINDOW_HI))
+     * consumed) — leave them alone here, this branch only backs RAM.
+     * Since the VIA and RIA windows are contiguous ($FFD0-$FFF9), check as one range. */
+    if (addr >= VIA_WINDOW_LO && addr <= RIA_WINDOW_HI)
         return p;
     if (p & M6502_RW)
     {
