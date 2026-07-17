@@ -105,8 +105,6 @@ static void mister_keyboard_init(void)
             bool is_kbd = is_keyboard(fd, path);
             printf("rp6502-emu: checking %s (fd=%d) - is_keyboard=%s\n", path, fd, is_kbd ? "true" : "false");
             if (is_kbd) {
-                int grab_rc = ioctl(fd, EVIOCGRAB, 1);
-                printf("  EVIOCGRAB rc=%d\n", grab_rc);
                 keyboard_fds[num_keyboards++] = fd;
             } else {
                 close(fd);
