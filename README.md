@@ -77,6 +77,16 @@ The Pi Pico VS Code Extension should only need the install from
 For emulation, I assume `xcode-select --install` is all you need. The submission
 to make MacOS work didn't come with instructions.
 
+## MiSTer FPGA Workflow
+
+When working on the MiSTer FPGA core sources in `src/fpga`, sync them to the sibling wrapper-core repository before building the `.rbf`:
+
+```
+tools/sync-fpga-to-wrapper.sh
+```
+
+Then build the bitstream from `../3s-mister-arm` using its wrapper tooling. See `MiSTerFPGA.md` for the full MiSTer build and deploy flow.
+
 ## Building with CMake and VS Code
 
 The rp6502 and emu project use different CMake models on purpose. The first

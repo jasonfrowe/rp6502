@@ -13,6 +13,12 @@ The emulator utilizes a hybrid architecture:
 * **`src/emu/`**: Main C/C++ emulator code run on the ARM CPU.
 * **`src/fpga/`**: SystemVerilog source code (`menu.sv`, `rtl/`, `sys/`) and the Quartus Prime project configuration files (`menu.qpf` / `menu.qsf`) for building the FPGA core bitstream.
 
+For MiSTer wrapper-core builds, this repository's `src/fpga/` tree is mirrored to the sibling repository `../3s-mister-arm/vendor/Menu_MiSTer/`. Use the helper script before building the core there:
+
+```bash
+tools/sync-fpga-to-wrapper.sh
+```
+
 ---
 
 ## 1. Building the ARM Emulator (`3s-arm`)
@@ -86,8 +92,35 @@ Copy the compiled binaries and dummy files to their respective locations on the 
    ```
 
 4. **FPGA Core Bitstream**:
-   Build the RBF file from the Quartus project located at `src/fpga/menu.qpf` and deploy it to:
-   `/media/fat/_Other/3S-ARM.rbf`
+   The FPGA bitstream is built from the sibling repository `../3s-mister-arm` (not from this `rp6502` tree).
+
+   First, sync any local FPGA edits from this repo into the wrapper seed:
+   ```bash
+   tools/sync-fpga-to-wrapper.sh
+   ```
+
+   From `../3s-mister-arm`:
+   ```bash
+   # 1) Put Quartus 17 tools on PATH
+   export PATH="/home/rowe/intelFPGA_lite/17.0/quartus/bin:$PATH"
+
+   # 2) Optional sanity check (shows whether local Quartus mode is available)
+   tools/mister-wrapper/build-core.sh --check-env
+
+   # 3) Build the core (default seed is menu)
+   tools/mister-wrapper/build-core.sh --seed menu
+   ```
+
+   Output artifact:
+   - `../3s-mister-arm/build/mister-wrapper-core/3S-ARM_YYYYMMDD.rbf`
+
+   Deploy the generated RBF to:
+   - `/media/fat/_Other/3S-ARM.rbf`
+
+   Example deploy:
+   ```bash
+   scp ../3s-mister-arm/build/mister-wrapper-core/3S-ARM_*.rbf root@mister.home.arpa:/media/fat/_Other/3S-ARM.rbf
+   ```
 
 ---
 
