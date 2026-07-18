@@ -32,6 +32,7 @@
 #include "ria/str/rln.h"
 #include "term/term.h" /* no emu/term shadow; resolves to vga/term */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(MISTER)

@@ -231,9 +231,9 @@ if(MISTER)
     target_compile_definitions(emu_core PRIVATE MISTER)
     target_include_directories(rp6502-emu PRIVATE /home/rowe/Software/FPGA/rp6502/build-mister/alsa-lib-install/include)
     target_link_libraries(rp6502-emu PRIVATE /home/rowe/Software/FPGA/rp6502/build-mister/alsa-lib-install/lib/libasound.a)
-    target_compile_options(rp6502-emu PRIVATE -Ofast -funroll-loops -mcpu=cortex-a9 -mfloat-abi=hard -mfpu=neon)
-    target_compile_options(emu_core PRIVATE -Ofast -funroll-loops -mcpu=cortex-a9 -mfloat-abi=hard -mfpu=neon)
-    target_link_options(rp6502-emu PRIVATE -Ofast -funroll-loops -mcpu=cortex-a9 -mfloat-abi=hard -mfpu=neon -static)
+    target_compile_options(rp6502-emu PRIVATE -Ofast -funroll-loops -mtune=cortex-a9 -mfloat-abi=hard -mfpu=neon)
+    target_compile_options(emu_core PRIVATE -Ofast -funroll-loops -mtune=cortex-a9 -mfloat-abi=hard -mfpu=neon)
+    target_link_options(rp6502-emu PRIVATE -Ofast -funroll-loops -static)
 endif()
 
 # Windows is only platform without getopt

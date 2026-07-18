@@ -233,6 +233,25 @@ void vga_set_framebuffer(uint32_t *fb)
 #if defined(MISTER)
 #define NV_BUF0_OFFSET      0x00000100u
 #define NV_BUF1_OFFSET      0x0002A200u
+
+static inline uint16_t vga_compose_px(const uint16_t *restrict *planes,
+                                      const bool *restrict filled,
+                                      int base, int x)
+{
+    uint16_t px = planes[base][x];
+    for (int i = base + 1; i < SCANVIDEO_PLANE_COUNT; i++)
+        if (filled[i] && (planes[i][x] & SCANVIDEO_ALPHA_MASK))
+            px = planes[i][x];
+    return px;
+}
+
+static inline void vga_copy_row_rgb565(uint16_t *restrict dst_row,
+                                       const uint16_t *restrict src_row,
+                                       int width)
+{
+    for (int x = 0; x < width; x++)
+        dst_row[x] = src_row[x];
+}
 #endif
 
 vga_prog_t shadow_g_prog[VGA_PROG_MAX];
@@ -312,6 +331,10 @@ static void render_scanline(int y, uint32_t *fb, bool use_shadow)
         }
 
 #if defined(MISTER)
+    const uint16_t *planes[SCANVIDEO_PLANE_COUNT] = {plane[0], plane[1], plane[2]};
+#endif
+
+#if defined(MISTER)
     (void)fb;
     if (ddr_base)
     {
@@ -327,16 +350,66 @@ static void render_scanline(int y, uint32_t *fb, bool use_shadow)
             }
             return;
         }
-        // Compositing loop: sequential & vectorized!
+        // Fast path: one opaque filled plane, no overlay/sprite compositing.
+        if (base == 0 && !p->fill_fn[1] && !p->fill_fn[2] &&
+            !p->sprite_fn[0] && !p->sprite_fn[1] && !p->sprite_fn[2])
+        {
+            if (W == 320)
+            {
+                for (int dst_y = y_start; dst_y < y_end; dst_y++)
+                {
+                    uint16_t *dst_row = local_fb + dst_y * 384;
+                    const uint16_t *src_row = planes[0];
+                    for (int x = 0; x < 384; x += 6)
+                    {
+                        dst_row[x + 0] = g_lut_rgb565[src_row[0]];
+                        dst_row[x + 1] = g_lut_rgb565[src_row[0]];
+                        dst_row[x + 2] = g_lut_rgb565[src_row[1]];
+                        dst_row[x + 3] = g_lut_rgb565[src_row[2]];
+                        dst_row[x + 4] = g_lut_rgb565[src_row[3]];
+                        dst_row[x + 5] = g_lut_rgb565[src_row[4]];
+                        src_row += 5;
+                    }
+                }
+            }
+            else if (W == 640)
+            {
+                for (int dst_y = y_start; dst_y < y_end; dst_y++)
+                {
+                    uint16_t *dst_row = local_fb + dst_y * 384;
+                    const uint16_t *src_row = planes[0];
+                    for (int x = 0; x < 384; x += 3)
+                    {
+                        dst_row[x + 0] = g_lut_rgb565[src_row[0]];
+                        dst_row[x + 1] = g_lut_rgb565[src_row[1]];
+                        dst_row[x + 2] = g_lut_rgb565[src_row[3]];
+                        src_row += 5;
+                    }
+                }
+            }
+            else
+            {
+                uint32_t x_step_16 = ((uint32_t)W << 16) / 384;
+                for (int dst_y = y_start; dst_y < y_end; dst_y++)
+                {
+                    uint16_t *dst_row = local_fb + dst_y * 384;
+                    uint32_t x_accum_16 = 0;
+                    for (int x = 0; x < 384; x++)
+                    {
+                        int src_x = (int)(x_accum_16 >> 16);
+                        x_accum_16 += x_step_16;
+                        dst_row[x] = g_lut_rgb565[planes[0][src_x]];
+                    }
+                }
+            }
+            return;
+        }
+
+        // General compositing path: build one RGB565 row, then scale/copy it.
         uint16_t temp_row[VGA_MAX_WIDTH];
         for (int x = 0; x < W; x++)
-        {
-            uint16_t px = plane[base][x];
-            for (int i = base + 1; i < SCANVIDEO_PLANE_COUNT; i++)
-                if (filled[i] && (plane[i][x] & SCANVIDEO_ALPHA_MASK))
-                    px = plane[i][x];
-            temp_row[x] = g_lut_rgb565[px];
-        }
+            temp_row[x] = g_lut_rgb565[vga_compose_px(planes, filled, base, x)];
+
         // Scaling and burst copy loop
         if (W == 320)
         {
