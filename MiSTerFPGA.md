@@ -19,6 +19,21 @@ For MiSTer wrapper-core builds, this repository's `src/fpga/` tree is mirrored t
 tools/sync-fpga-to-wrapper.sh
 ```
 
+## MiSTer Resolution Notes
+
+The emulator supports the same canvas sizes exposed by `vga_set_canvas()`:
+
+| Canvas | Use |
+|--------|-----|
+| `640x480` | Boot console and terminal work |
+| `320x240` | Standard low-res game canvas |
+| `320x180` | Letterboxed/16:9-style low-res canvas |
+| `640x360` | Widescreen high-res canvas |
+
+The 640x480 console mode is not lost. It remains the default boot console canvas, and canvas code `3` still maps to `640x480` for full-height text and menu work.
+
+The MiSTer video path is still 384x224 on the FPGA side, so the emulator scales or centers the selected canvas into that output. That means the user-facing resolution choice is a canvas policy, not a change to the native 384x224 DDR3 format.
+
 ---
 
 ## 1. Building the ARM Emulator (`3s-arm`)
