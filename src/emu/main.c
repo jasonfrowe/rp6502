@@ -34,6 +34,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(MISTER)
+#ifndef MISTER_SCANLINE_TIMING
+#define MISTER_SCANLINE_TIMING 0
+#endif
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Machine-global run state                                            */
 /* ------------------------------------------------------------------ */
@@ -300,19 +306,27 @@ bool main_run_scanline(bool render)
      * catch-up frame (render == false) skips the pixels but keeps the timing. */
     if (render && s_run_line < canvas_h)
     {
+#if defined(MISTER) && MISTER_SCANLINE_TIMING
         uint64_t v0 = os_mono_ns();
+#endif
         vga_render_scanline(s_run_line, false);
+#if defined(MISTER) && MISTER_SCANLINE_TIMING
         uint64_t v1 = os_mono_ns();
         g_vga_time_ns += (v1 - v0);
+#endif
 
         if (mister_write_scanline_cb)
             mister_write_scanline_cb(s_run_line);
     }
 
+#if defined(MISTER) && MISTER_SCANLINE_TIMING
     uint64_t c0 = os_mono_ns();
+#endif
     bool held = run_until(scanline_deadline_8(scanline_n + 1), dbg);
+#if defined(MISTER) && MISTER_SCANLINE_TIMING
     uint64_t c1 = os_mono_ns();
     g_cpu_time_ns += (c1 - c0);
+#endif
 
     if (held)
         return false; /* held at a breakpoint mid-frame; resume re-runs the frame */

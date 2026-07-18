@@ -41,6 +41,10 @@
 #include "emu/app/audio_out.h"
 #endif
 
+#ifndef MISTER_INPUT_TRACE
+#define MISTER_INPUT_TRACE 0
+#endif
+
 // DDR3 structures and base address
 #define NV_DDR_PHYS_BASE    0x3A000000u
 #define NV_DDR_REGION_SIZE  0x00060000u  // 384KB
@@ -139,12 +143,14 @@ static bool is_keyboard(int fd, const char *path)
     memset(key_bits, 0, sizeof(key_bits));
     int rc = ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits);
     if (rc < 0) {
-        printf("  %s: ioctl EV_KEY failed: %d\n", path, rc);
+        if (MISTER_INPUT_TRACE)
+            printf("  %s: ioctl EV_KEY failed: %d\n", path, rc);
         return false;
     }
     int has_a = (key_bits[KEY_A / 8] & (1 << (KEY_A % 8))) != 0;
     int has_z = (key_bits[KEY_Z / 8] & (1 << (KEY_Z % 8))) != 0;
-    printf("  %s: ioctl rc=%d, has_a=%d, has_z=%d\n", path, rc, has_a, has_z);
+    if (MISTER_INPUT_TRACE)
+        printf("  %s: ioctl rc=%d, has_a=%d, has_z=%d\n", path, rc, has_a, has_z);
     return has_a && has_z;
 }
 
@@ -157,7 +163,8 @@ static void mister_keyboard_init(void)
         int fd = open(path, O_RDONLY | O_NONBLOCK);
         if (fd >= 0) {
             bool is_kbd = is_keyboard(fd, path);
-            printf("rp6502-emu: checking %s (fd=%d) - is_keyboard=%s\n", path, fd, is_kbd ? "true" : "false");
+            if (MISTER_INPUT_TRACE)
+                printf("rp6502-emu: checking %s (fd=%d) - is_keyboard=%s\n", path, fd, is_kbd ? "true" : "false");
             if (is_kbd) {
                 keyboard_fds[num_keyboards++] = fd;
             } else {
@@ -353,8 +360,9 @@ static void mister_keyboard_update(void)
             uint16_t type = *(uint16_t*)&ev_buf[8];
             uint16_t code = *(uint16_t*)&ev_buf[10];
             int32_t value = *(int32_t*)&ev_buf[12];
-            
-            printf("rp6502-emu: fd=%d event: type=%d, code=%d, value=%d\n", fd, type, code, value);
+
+            if (MISTER_INPUT_TRACE)
+                printf("rp6502-emu: fd=%d event: type=%d, code=%d, value=%d\n", fd, type, code, value);
             
             if (type == EV_KEY)
             {
