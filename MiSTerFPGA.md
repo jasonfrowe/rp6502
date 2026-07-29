@@ -31,7 +31,7 @@ The MiSTer video path is still 384x224 on the FPGA side, so the emulator scales 
 
 ---
 
-## 1. Building the ARM Emulator (`3s-arm`)
+## 1. Building the ARM Emulator (`rp6502-emu`)
 
 To cross-compile the emulator for the 32-bit ARM Cortex-A9 processor on the DE10-Nano, use the cross-compiler toolchain and CMake.
 
@@ -58,7 +58,7 @@ This compiles a statically-linked binary `build-mister/rp6502-emu` optimized for
 
 ---
 
-## 2. Building the OSD Wrapper Daemon (`MiSTer_3S-ARM`)
+## 2. Building the OSD Wrapper Daemon (`MiSTer_RP6502-ARM`)
 
 The OSD wrapper daemon wraps input handling, OSD config, and the core launch sequence. Because it dynamically links against standard system libraries, it **must** be compiled inside the Docker build environment to target the exact dynamic glibc version (GLIBC 2.27/3.2.0 EABI5) present on the MiSTer FPGA Linux system.
 
@@ -73,7 +73,7 @@ cd vendor/RP6502-mister-arm
 env PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" tools/mister-wrapper/build-hps.sh
 ```
 
-The output will be generated at `vendor/RP6502-mister-arm/build/mister-wrapper-hps/MiSTer_3S-ARM` when invoked from the `rp6502` repo root.
+The output will be generated at `vendor/RP6502-mister-arm/build/mister-wrapper-hps/MiSTer_RP6502-ARM` when invoked from the `rp6502` repo root.
 
 ---
 
@@ -87,14 +87,14 @@ The example deploy commands below assume you are running them from the `rp6502` 
 
 1. **OSD Wrapper Daemon**:
    ```bash
-   scp vendor/RP6502-mister-arm/build/mister-wrapper-hps/MiSTer_3S-ARM root@mister.home.arpa:/media/fat/MiSTer_3S-ARM
-   ssh root@mister.home.arpa "chmod +x /media/fat/MiSTer_3S-ARM"
+   scp vendor/RP6502-mister-arm/build/mister-wrapper-hps/MiSTer_RP6502-ARM root@mister.home.arpa:/media/fat/MiSTer_RP6502-ARM
+   ssh root@mister.home.arpa "chmod +x /media/fat/MiSTer_RP6502-ARM"
    ```
 
 2. **ARM Emulator Binary**:
    ```bash
-   scp build-mister/rp6502-emu root@mister.home.arpa:/media/fat/games/3s-arm/bin/3s-arm
-   ssh root@mister.home.arpa "chmod +x /media/fat/games/3s-arm/bin/3s-arm"
+   scp build-mister/rp6502-emu root@mister.home.arpa:/media/fat/games/RP6502/bin/rp6502-emu
+   ssh root@mister.home.arpa "chmod +x /media/fat/games/RP6502/bin/rp6502-emu"
    ```
 
 3. **Dummy AFS Verification Signature**:
@@ -102,7 +102,7 @@ The example deploy commands below assume you are running them from the `rp6502` 
    ```bash
    # Generates a dummy resource file containing little-endian 0x00534641 (AFS\0)
    printf '\x41\x46\x53\x00' > SF33RD.AFS
-   scp SF33RD.AFS root@mister.home.arpa:/media/fat/games/3s-arm/resources/SF33RD.AFS
+   scp SF33RD.AFS root@mister.home.arpa:/media/fat/games/RP6502/resources/SF33RD.AFS
    ```
 
 4. **FPGA Core Bitstream**:
@@ -123,14 +123,14 @@ The example deploy commands below assume you are running them from the `rp6502` 
    ```
 
    Output artifact:
-   - `vendor/RP6502-mister-arm/build/mister-wrapper-core/3S-ARM_YYYYMMDD.rbf` from the `rp6502` repo root
+   - `vendor/RP6502-mister-arm/build/mister-wrapper-core/RP6502_YYYYMMDD.rbf` from the `rp6502` repo root
 
    Deploy the generated RBF to:
-   - `/media/fat/_Other/3S-ARM.rbf`
+   - `/media/fat/_Other/` (keep the dated filename, e.g. `RP6502_YYYYMMDD.rbf`)
 
    Example deploy:
    ```bash
-   scp vendor/RP6502-mister-arm/build/mister-wrapper-core/3S-ARM_*.rbf root@mister.home.arpa:/media/fat/_Other/3S-ARM.rbf
+   scp vendor/RP6502-mister-arm/build/mister-wrapper-core/RP6502_*.rbf root@mister.home.arpa:/media/fat/_Other/
    ```
 
 ---
@@ -146,7 +146,7 @@ During the launch handoff:
 3. This allows the emulator to intercept all keyboard events directly. When the emulator exits, the file descriptors are closed and the grab is released.
 
 ### CPU Performance Timing
-The emulator cycle tick loop is highly cycle-accurate, causing the single-core CPU usage on the dual-core Cortex-A9 to run flat out. Timings are output to `/media/fat/games/3s-arm/logs/last-run.log` every second to measure frame performance (e.g. `cpu`, `vga` render, `video` DDR3 copy, `audio` synth).
+The emulator cycle tick loop is highly cycle-accurate, causing the single-core CPU usage on the dual-core Cortex-A9 to run flat out. Timings are output to `/media/fat/games/RP6502/logs/last-run.log` every second to measure frame performance (e.g. `cpu`, `vga` render, `video` DDR3 copy, `audio` synth).
 
 ---
 
