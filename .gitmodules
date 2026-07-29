@@ -23,3 +23,7 @@
 [submodule "vendor/emsdk"]
 	path = vendor/emsdk
 	url = https://github.com/emscripten-core/emsdk.git
+[submodule "vendor/RP6502-mister-arm"]
+	path = vendor/RP6502-mister-arm
+	url = https://github.com/jasonfrowe/RP6502-mister-arm.git
+	branch = mister
