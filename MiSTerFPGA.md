@@ -148,6 +148,11 @@ During the launch handoff:
 ### CPU Performance Timing
 The emulator cycle tick loop is highly cycle-accurate, causing the single-core CPU usage on the dual-core Cortex-A9 to run flat out. Timings are output to `/media/fat/games/RP6502/logs/last-run.log` every second to measure frame performance (e.g. `cpu`, `vga` render, `video` DDR3 copy, `audio` synth).
 
+### OSD ROM Selection
+The RP6502 OSD includes a `Select ROM` file picker entry that accepts both `.rp6502` and `.bin` files.
+
+The selected path is saved in MiSTer config storage (`/media/fat/config/RP6502.f1`) and is applied by the wrapper on each launch/restart. If no selection exists, if the selected file is missing, or if the extension is unsupported, the wrapper falls back to the emulator's default ROM behavior.
+
 ---
 
 ## 5. Optimization & Performance Tuning (8 MHz 60 FPS)
