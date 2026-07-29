@@ -153,6 +153,11 @@ The RP6502 OSD includes a `Select ROM` file picker entry that accepts both `.rp6
 
 The selected path is saved in MiSTer config storage (`/media/fat/config/RP6502.f1`) and is applied by the wrapper on each launch/restart. If no selection exists, if the selected file is missing, or if the extension is unsupported, the wrapper falls back to the emulator's default ROM behavior.
 
+### OSD PHI2 Clock Selection
+The RP6502 OSD includes a `PHI2 (kHz)` option with `2000`, `4000`, and `8000` values. The wrapper passes this value to `rp6502-emu` as `--phi2 <khz>` on launch.
+
+PHI2 changes are restart-applied: selecting a new PHI2 value updates the pending launch setting, and the new clock takes effect after `Restart`.
+
 ---
 
 ## 5. Optimization & Performance Tuning (8 MHz 60 FPS)
