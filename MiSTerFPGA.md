@@ -11,13 +11,8 @@ The emulator utilizes a hybrid architecture:
 ## Repository Structure
 
 * **`src/emu/`**: Main C/C++ emulator code run on the ARM CPU.
-* **`src/fpga/`**: SystemVerilog source code (`menu.sv`, `rtl/`, `sys/`) and the Quartus Prime project configuration files (`menu.qpf` / `menu.qsf`) for building the FPGA core bitstream.
-
-For MiSTer wrapper-core builds, this repository's `src/fpga/` tree is mirrored to the sibling repository `../3s-mister-arm/vendor/Menu_MiSTer/`. Use the helper script before building the core there:
-
-```bash
-tools/sync-fpga-to-wrapper.sh
-```
+* **`vendor/RP6502-mister-arm/`**: Tracked MiSTer wrapper/core submodule. This is the active source of truth for MiSTer-specific wrapper and FPGA-core work, including `vendor/Menu_MiSTer/`, `vendor/Main_MiSTer/`, and the `tools/mister-wrapper/` build scripts.
+* **`src/fpga/`**: Legacy local FPGA tree from the earlier mirror-based workflow. It is not part of the active MiSTer core build path now that the wrapper/core repository is tracked as a submodule.
 
 ## MiSTer Resolution Notes
 
@@ -69,14 +64,16 @@ The OSD wrapper daemon wraps input handling, OSD config, and the core launch seq
 
 ### Build Commands
 
-In the `3s-mister-arm` folder:
+From the `vendor/RP6502-mister-arm` submodule:
 
 ```bash
+cd vendor/RP6502-mister-arm
+
 # Clean the host PATH from any local ARM compiler to force Docker build mode
 env PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" tools/mister-wrapper/build-hps.sh
 ```
 
-The output will be generated at `build/mister-wrapper-hps/MiSTer_3S-ARM`.
+The output will be generated at `vendor/RP6502-mister-arm/build/mister-wrapper-hps/MiSTer_3S-ARM` when invoked from the `rp6502` repo root.
 
 ---
 
@@ -84,11 +81,13 @@ The output will be generated at `build/mister-wrapper-hps/MiSTer_3S-ARM`.
 
 Copy the compiled binaries and dummy files to their respective locations on the MiSTer.
 
+The example deploy commands below assume you are running them from the `rp6502` repo root.
+
 ### Paths and Commands
 
 1. **OSD Wrapper Daemon**:
    ```bash
-   scp build/mister-wrapper-hps/MiSTer_3S-ARM root@mister.home.arpa:/media/fat/MiSTer_3S-ARM
+   scp vendor/RP6502-mister-arm/build/mister-wrapper-hps/MiSTer_3S-ARM root@mister.home.arpa:/media/fat/MiSTer_3S-ARM
    ssh root@mister.home.arpa "chmod +x /media/fat/MiSTer_3S-ARM"
    ```
 
@@ -107,15 +106,12 @@ Copy the compiled binaries and dummy files to their respective locations on the 
    ```
 
 4. **FPGA Core Bitstream**:
-   The FPGA bitstream is built from the sibling repository `../3s-mister-arm` (not from this `rp6502` tree).
+   The FPGA bitstream is now built from the tracked wrapper/core submodule instead of the old sibling checkout. No sync step is required.
 
-   First, sync any local FPGA edits from this repo into the wrapper seed:
+   From `vendor/RP6502-mister-arm`:
    ```bash
-   tools/sync-fpga-to-wrapper.sh
-   ```
+   cd vendor/RP6502-mister-arm
 
-   From `../3s-mister-arm`:
-   ```bash
    # 1) Put Quartus 17 tools on PATH
    export PATH="/home/rowe/intelFPGA_lite/17.0/quartus/bin:$PATH"
 
@@ -127,14 +123,14 @@ Copy the compiled binaries and dummy files to their respective locations on the 
    ```
 
    Output artifact:
-   - `../3s-mister-arm/build/mister-wrapper-core/3S-ARM_YYYYMMDD.rbf`
+   - `vendor/RP6502-mister-arm/build/mister-wrapper-core/3S-ARM_YYYYMMDD.rbf` from the `rp6502` repo root
 
    Deploy the generated RBF to:
    - `/media/fat/_Other/3S-ARM.rbf`
 
    Example deploy:
    ```bash
-   scp ../3s-mister-arm/build/mister-wrapper-core/3S-ARM_*.rbf root@mister.home.arpa:/media/fat/_Other/3S-ARM.rbf
+   scp vendor/RP6502-mister-arm/build/mister-wrapper-core/3S-ARM_*.rbf root@mister.home.arpa:/media/fat/_Other/3S-ARM.rbf
    ```
 
 ---
