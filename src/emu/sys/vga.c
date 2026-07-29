@@ -428,6 +428,7 @@ static void render_scanline(int y, uint32_t *fb, bool use_shadow)
                     src_row += 5;
                 }
             }
+            return;
         }
         else if (W == 640)
         {

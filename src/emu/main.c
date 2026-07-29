@@ -231,19 +231,17 @@ static bool run_until(uint64_t deadline_8, bool dbg)
     }
     else
     {
-        int32_t cycles = (int32_t)((deadline_8 - clock_8) / step_8);
-        if (cycles > 0)
+        if (__builtin_expect(cpu_active(), 1))
         {
-            for (int32_t i = 0; i < cycles; i++)
+            int32_t cycles = (int32_t)((deadline_8 - clock_8) / step_8);
+            if (cycles > 0)
             {
-                if (__builtin_expect(!cpu_active(), 0))
+                for (int32_t i = 0; i < cycles; i++)
                 {
-                    cycles = i;
-                    break;
+                    (void)cpu_tick_fast();
                 }
-                (void)cpu_tick_fast();
+                clock_8 += (uint64_t)cycles * step_8;
             }
-            clock_8 += (uint64_t)cycles * step_8;
         }
     }
     if (clock_8 < deadline_8)
