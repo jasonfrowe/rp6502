@@ -87,6 +87,7 @@ static void merge_rom_args(cli_options *o, int argc, char **argv)
     if (merged.code_page > 0)
         o->code_page = merged.code_page;
     o->mute = merged.mute;
+    o->mister_fast_video = merged.mister_fast_video;
     if (merged.have_seed)
     {
         o->have_seed = true;
@@ -105,6 +106,8 @@ static bool apply_options(const cli_options *o)
         rand_set_seed((uint64_t)o->seed);
     if (o->mute)
         aud_set_enabled(false);
+    if (o->mister_fast_video)
+        vga_set_mister_fast_video(true);
     if (o->phi2_khz > 0)
     {
         if (o->phi2_khz < CPU_PHI2_MIN_KHZ || o->phi2_khz > CPU_PHI2_MAX_KHZ)

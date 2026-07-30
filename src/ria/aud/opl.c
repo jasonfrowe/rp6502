@@ -29,6 +29,39 @@ static int16_t opl_sample;
 
 #pragma GCC push_options
 #pragma GCC optimize("O3")
+#if defined(MISTER)
+static inline int16_t opl_mix_sample(void)
+{
+    int16_t next;
+    OPL_calc_buffer(opl_emu8950, &next, 1);
+    int16_t s = (int16_t)(next >> (16 - AUD_PWM_BITS - 2));
+    s = (int16_t)(s + bel_sample(OPL_SAMPLE_RATE));
+    int16_t max_val = (1 << (AUD_PWM_BITS - 1)) - 1;
+    int16_t min_val = -(1 << (AUD_PWM_BITS - 1));
+    if (s < min_val)
+        s = min_val;
+    if (s > max_val)
+        s = max_val;
+    return s;
+}
+
+static void
+    __time_critical_func(opl_irq_handler)(void)
+{
+    opl_sample = opl_mix_sample();
+    pwm_set_chan_level(AUD_L_SLICE, AUD_L_CHAN, opl_sample + AUD_PWM_CENTER);
+    pwm_set_chan_level(AUD_R_SLICE, AUD_R_CHAN, opl_sample + AUD_PWM_CENTER);
+
+    uint8_t max_work = 8;
+    while (max_work-- && xram_queue_tail != xram_queue_head)
+    {
+        uint8_t tail = ++xram_queue_tail;
+        OPL_writeReg(opl_emu8950,
+                     xram_queue[tail][0],
+                     xram_queue[tail][1]);
+    }
+}
+#else
 static void
     __isr
     __time_critical_func(opl_irq_handler)(void)
@@ -61,6 +94,7 @@ static void
                      xram_queue[tail][1]);
     }
 }
+#endif
 #pragma GCC pop_options
 
 bool opl_xreg(uint16_t word)

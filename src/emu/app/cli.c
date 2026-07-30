@@ -29,6 +29,9 @@ void cli_options_init(cli_options *o)
     o->scale = 1.5;
     o->vsync = true;
     o->scale_filter = WINDOW_FILTER_SHARP;
+#if defined(MISTER)
+    o->mister_fast_video = true;
+#endif
 }
 
 /* "RRGGBB" (optional leading '#') -> three 0-255 channels. */
@@ -53,7 +56,8 @@ enum
 {
     OPT_SCREENSHOT = 256, OPT_FRAMES, OPT_SCALE, OPT_FILTER, OPT_INPUT,
     OPT_TMPDRIVE, OPT_ROM, OPT_BGCOLOR, OPT_PHI2, OPT_CP, OPT_SEED,
-    OPT_MUTE, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_INI, OPT_VSYNC, OPT_NO_VSYNC,
+    OPT_MUTE, OPT_MISTER_FAST_VIDEO, OPT_DEBUG, OPT_DAP, OPT_CREDITS, OPT_INI,
+    OPT_VSYNC, OPT_NO_VSYNC,
 };
 static const struct option longopts[] = {
     {"screenshot",   required_argument, NULL, OPT_SCREENSHOT},
@@ -70,6 +74,7 @@ static const struct option longopts[] = {
     {"cp",           required_argument, NULL, OPT_CP},
     {"seed",         required_argument, NULL, OPT_SEED},
     {"mute",         no_argument,       NULL, OPT_MUTE},
+    {"mister-fast-video", no_argument,  NULL, OPT_MISTER_FAST_VIDEO},
     {"debug",        no_argument,       NULL, OPT_DEBUG},
     {"dap",          no_argument,       NULL, OPT_DAP},
     {"credits",      no_argument,       NULL, OPT_CREDITS},
@@ -97,6 +102,8 @@ void cli_usage(const char *argv0)
             "  --seed <n>                fixed RNG seed for reproducible runs\n"
             "                            (default: host entropy)\n"
             "  --mute                    mute all audio (no synth, no OS audio device)\n"
+            "  --mister-fast-video       MiSTer: no horizontal resample; center crop/pad\n"
+            "                            to 384x224 (faster, preserves sharp pixels)\n"
             "  --debug                   on-screen machine debugger (CPU/VIA/disasm); holds\n"
             "                            the window open on stop for inspection\n"
             "  --dap                     act as a DAP debug adapter on stdio (implies --debug)\n"
@@ -185,6 +192,7 @@ int cli_parse_args(int argc, char **argv, cli_options *o)
             o->have_seed = true;
             break;
         case OPT_MUTE: o->mute = true; break;
+        case OPT_MISTER_FAST_VIDEO: o->mister_fast_video = true; break;
         case OPT_DEBUG: o->debug = true; break;
         case OPT_DAP: o->dap = true; break;
         case OPT_CREDITS: o->credits = true; break;

@@ -35,6 +35,7 @@ typedef struct
     int phi2_khz;  /* 0 = leave at default */
     int code_page; /* 0 = leave at the default 437 */
     bool mute;
+    bool mister_fast_video; /* MiSTer: crop/pad to 384x224, skip horizontal resample */
     bool debug;   /* --debug: on-screen machine debugger */
     bool dap;     /* --dap: also serve DAP on stdio (implies --debug) */
     bool credits;       /* --credits: print third-party notices and exit */

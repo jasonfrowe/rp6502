@@ -55,8 +55,14 @@ static unsigned long s_frame_count;
 /* Absolute, never reset per frame — feeds the exact deadline math below. */
 static uint64_t scanline_n;
 
+/* Current deadline target for scanline_n + 1, in master_8 units, and its exact
+ * fractional accumulator for the 4096000/63 increment. */
+static uint64_t scanline_deadline_target_8;
+static uint8_t scanline_deadline_rem;
+
 uint64_t g_vga_time_ns = 0;
 uint64_t g_cpu_time_ns = 0;
+uint64_t g_aud_time_ns = 0;
 
 int main_exit_code(void) { return s_exit_code; }
 void main_set_exit_code(int code) { s_exit_code = code; }
@@ -64,6 +70,7 @@ unsigned long main_frame_count(void) { return s_frame_count; }
 uint64_t main_clock_8(void) { return master_8; }
 
 static void init_scanline_deadlines(void);
+static inline void advance_scanline_deadline(void);
 
 #if defined(MISTER)
 #include <fcntl.h>
@@ -183,21 +190,23 @@ void main_init(void)
 /* Run engine                                                          */
 /* ------------------------------------------------------------------ */
 
-static uint64_t scanline_deadlines[528];
-
 static void init_scanline_deadlines(void)
 {
-    for (int i = 0; i < 528; i++)
-    {
-        scanline_deadlines[i] = (uint64_t)i * 4096000ull / 63;
-    }
+    scanline_deadline_target_8 = 0;
+    scanline_deadline_rem = 0;
+    advance_scanline_deadline(); /* target for scanline_n + 1 when scanline_n == 0 */
 }
 
-static uint64_t scanline_deadline_8(uint64_t n)
+static inline void advance_scanline_deadline(void)
 {
-    if (__builtin_expect(n < 528, 1))
-        return scanline_deadlines[n];
-    return n * 4096000ull / 63;
+    /* Exact increment: 4096000/63 = 65015 + 55/63 master_8 ticks per scanline. */
+    scanline_deadline_target_8 += 65015ull;
+    scanline_deadline_rem = (uint8_t)(scanline_deadline_rem + 55u);
+    if (scanline_deadline_rem >= 63u)
+    {
+        scanline_deadline_rem = (uint8_t)(scanline_deadline_rem - 63u);
+        scanline_deadline_target_8++;
+    }
 }
 
 /* Run 6502 cycles until the master clock reaches deadline_8, the program halts,
@@ -233,7 +242,10 @@ static bool run_until(uint64_t deadline_8, bool dbg)
     {
         if (__builtin_expect(cpu_active(), 1))
         {
-            int32_t cycles = (int32_t)((deadline_8 - clock_8) / step_8);
+            uint64_t delta_8 = deadline_8 - clock_8;
+            int32_t cycles = (int32_t)(delta_8 <= 0xFFFFFFFFull
+                                           ? ((uint32_t)delta_8 / step_8)
+                                           : (delta_8 / step_8));
             if (cycles > 0)
             {
                 for (int32_t i = 0; i < cycles; i++)
@@ -321,7 +333,7 @@ bool main_run_scanline(bool render)
 #if defined(MISTER) && MISTER_SCANLINE_TIMING
     uint64_t c0 = os_mono_ns();
 #endif
-    bool held = run_until(scanline_deadline_8(scanline_n + 1), dbg);
+    bool held = run_until(scanline_deadline_target_8, dbg);
 #if defined(MISTER) && MISTER_SCANLINE_TIMING
     uint64_t c1 = os_mono_ns();
     g_cpu_time_ns += (c1 - c0);
@@ -335,6 +347,7 @@ bool main_run_scanline(bool render)
                   * one-row-per-tick lazy clears drain within the frame
                   * that issued them, not one row per frame */
     scanline_n++;
+    advance_scanline_deadline();
     if (!s_run_vsynced && s_run_line + 1 >= vsync_line)
     {
         REGS(0xFFE3) = (uint8_t)(REGS(0xFFE3) + 1); /* VSYNC counter, 8-bit wrap */
@@ -350,7 +363,14 @@ bool main_run_scanline(bool render)
          * the read callback) then advance any blocking syscall waiting on it. */
         rln_task();
         ria_task();
+    #if defined(MISTER)
+        uint64_t a0 = os_mono_ns();
+    #endif
         aud_task();
+    #if defined(MISTER)
+        uint64_t a1 = os_mono_ns();
+        g_aud_time_ns += (a1 - a0);
+    #endif
 
         /* An exec committed this frame: load the new program and restart the CPU,
          * keeping the master clock and the argv pro_api_exec stored. The terminal

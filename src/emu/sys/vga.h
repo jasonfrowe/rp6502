@@ -37,6 +37,8 @@ void vga_render_scanline(int y, bool use_shadow);
 void vga_prepare_shadow_prog(void);
 extern int shadow_canvas_h;
 void vga_canvas_size(int *w, int *h);
+void vga_set_mister_fast_video(bool on);
+bool vga_mister_fast_video(void);
 
 /* The largest canvas (the 640x480 boot console); framebuffer owners size
  * their storage with these. */

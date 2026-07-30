@@ -78,6 +78,12 @@ static size_t copy_size;
 static volatile uint32_t* copy_ctrl_reg;
 static uint32_t copy_ctrl_val;
 
+static pthread_mutex_t perf_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t perf_copy_wait_ns;
+static uint64_t perf_copy_render_ns;
+static uint64_t perf_copy_memcpy_ns;
+static uint64_t perf_copy_flip_ns;
+
 static void* copy_thread_func(void* arg)
 {
     (void)arg;
@@ -97,17 +103,29 @@ static void* copy_thread_func(void* arg)
 
         memset(local_fb, 0, sizeof(local_fb));
 
+        uint64_t r0 = os_mono_ns();
         // 1. Render all scanlines of the frame in parallel on CPU 1
         for (int y = 0; y < shadow_canvas_h; y++)
         {
             vga_render_scanline(y, true);
         }
+        uint64_t r1 = os_mono_ns();
 
+        uint64_t m0 = os_mono_ns();
         // 2. Burst-copy the rendered frame buffer to DDR3
         memcpy(copy_dst, copy_src, copy_size);
+        uint64_t m1 = os_mono_ns();
 
+        uint64_t f0 = os_mono_ns();
         // 3. Swap display buffers on the FPGA
         *copy_ctrl_reg = copy_ctrl_val;
+        uint64_t f1 = os_mono_ns();
+
+        pthread_mutex_lock(&perf_lock);
+        perf_copy_render_ns += (r1 - r0);
+        perf_copy_memcpy_ns += (m1 - m0);
+        perf_copy_flip_ns += (f1 - f0);
+        pthread_mutex_unlock(&perf_lock);
 
         sem_post(&sem_copy_done);
     }
@@ -116,6 +134,7 @@ static void* copy_thread_func(void* arg)
 
 extern uint64_t g_vga_time_ns;
 extern uint64_t g_cpu_time_ns;
+extern uint64_t g_aud_time_ns;
 
 // Mister shared memory joystick structure
 typedef struct {
@@ -563,7 +582,12 @@ static void swap_frame_mister(void)
     if (!ddr_base) return;
 
     // 1. Wait for previous asynchronous render/copy to complete
+    uint64_t w0 = os_mono_ns();
     sem_wait(&sem_copy_done);
+    uint64_t w1 = os_mono_ns();
+    pthread_mutex_lock(&perf_lock);
+    perf_copy_wait_ns += (w1 - w0);
+    pthread_mutex_unlock(&perf_lock);
 
     // 2. Prepare the shadow program and canvas geometry
     vga_prepare_shadow_prog();
@@ -662,6 +686,8 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
         static uint64_t total_audio_ns = 0;
         static uint64_t total_input_ns = 0;
         static uint64_t total_video_ns = 0;
+        static uint64_t total_frame_late_ns = 0;
+        static unsigned total_frame_late_count = 0;
         static int stats_frames = 0;
 
         total_emu_ns += (t1 - t0);
@@ -672,25 +698,60 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
 
         if (stats_frames >= 60)
         {
-            double true_total = (double)total_emu_ns / stats_frames / 1000000.0;
+            uint64_t copy_wait_ns = 0;
+            uint64_t copy_render_ns = 0;
+            uint64_t copy_memcpy_ns = 0;
+            uint64_t copy_flip_ns = 0;
+            pthread_mutex_lock(&perf_lock);
+            copy_wait_ns = perf_copy_wait_ns;
+            copy_render_ns = perf_copy_render_ns;
+            copy_memcpy_ns = perf_copy_memcpy_ns;
+            copy_flip_ns = perf_copy_flip_ns;
+            perf_copy_wait_ns = 0;
+            perf_copy_render_ns = 0;
+            perf_copy_memcpy_ns = 0;
+            perf_copy_flip_ns = 0;
+            pthread_mutex_unlock(&perf_lock);
+
+            double emu_ms = (double)total_emu_ns / stats_frames / 1000000.0;
             double cpu_ms = (double)g_cpu_time_ns / stats_frames / 1000000.0;
             double vga_ms = (double)g_vga_time_ns / stats_frames / 1000000.0;
+            double audsynth_ms = (double)g_aud_time_ns / stats_frames / 1000000.0;
             double audio_ms = (double)total_audio_ns / stats_frames / 1000000.0;
             double input_ms = (double)total_input_ns / stats_frames / 1000000.0;
             double video_ms = (double)total_video_ns / stats_frames / 1000000.0;
-            double overhead_ms = true_total - cpu_ms - vga_ms;
-            printf("rp6502-emu stats (ms/frame): cpu=%.2f vga=%.2f audio=%.2f input=%.2f video=%.2f overhead=%.2f total=%.2f (phi2=%d)\n",
-                cpu_ms, vga_ms, audio_ms, input_ms, video_ms, overhead_ms, true_total, cpu_get_phi2_khz_run());
+            double cpu0_ms = (double)(total_emu_ns + total_audio_ns + total_input_ns + total_video_ns) / stats_frames / 1000000.0;
+            double cpu0_nonemu_ms = cpu0_ms - emu_ms;
+            double frame_budget_ms = (double)frame_duration_ns / 1000000.0;
+            double slack_ms = frame_budget_ms - cpu0_ms;
+            double copy_wait_ms = (double)copy_wait_ns / stats_frames / 1000000.0;
+            double copy_render_ms = (double)copy_render_ns / stats_frames / 1000000.0;
+            double copy_memcpy_ms = (double)copy_memcpy_ns / stats_frames / 1000000.0;
+            double copy_flip_ms = (double)copy_flip_ns / stats_frames / 1000000.0;
+            double late_ms = (double)total_frame_late_ns / stats_frames / 1000000.0;
+            printf("rp6502-emu stats (ms/frame): cpu=%.2f vga=%.2f emu=%.2f audsynth=%.2f audio=%.2f input=%.2f video=%.2f cpu0=%.2f nonemu=%.2f slack=%.2f wait=%.2f render=%.2f memcpy=%.2f flip=%.2f late=%.2f miss=%u (phi2=%d)\n",
+                cpu_ms, vga_ms, emu_ms, audsynth_ms, audio_ms, input_ms, video_ms, cpu0_ms, cpu0_nonemu_ms, slack_ms,
+                copy_wait_ms, copy_render_ms, copy_memcpy_ms, copy_flip_ms, late_ms, total_frame_late_count,
+                cpu_get_phi2_khz_run());
             g_cpu_time_ns = 0;
             g_vga_time_ns = 0;
+            g_aud_time_ns = 0;
             total_emu_ns = 0;
             total_audio_ns = 0;
             total_input_ns = 0;
             total_video_ns = 0;
+            total_frame_late_ns = 0;
+            total_frame_late_count = 0;
             stats_frames = 0;
         }
 
         next_frame_time_ns += frame_duration_ns;
+        uint64_t now_ns = os_mono_ns();
+        if (now_ns > next_frame_time_ns)
+        {
+            total_frame_late_ns += (now_ns - next_frame_time_ns);
+            total_frame_late_count++;
+        }
         os_sleep_until_ns(next_frame_time_ns);
     }
 

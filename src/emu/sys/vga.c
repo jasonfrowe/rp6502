@@ -39,6 +39,7 @@ static vga_prog_t g_prog[VGA_PROG_MAX];
 
 /* Highest scanline any program renders; vsync fires here (firmware parity). */
 static int16_t g_highest_scanline;
+static bool g_mister_fast_video;
 
 /* RGB555(+alpha bit) -> RGBA8 (0xAABBGGRR) lookup. */
 static uint32_t g_lut[0x10000];
@@ -212,6 +213,16 @@ void vga_canvas_size(int *w, int *h)
     *h = g_canvas_h;
 }
 
+void vga_set_mister_fast_video(bool on)
+{
+    g_mister_fast_video = on;
+}
+
+bool vga_mister_fast_video(void)
+{
+    return g_mister_fast_video;
+}
+
 /* The app-owned framebuffer the scanlines render into (the window's texture
  * staging, main.c's screenshot buffer, a test's assertion buffer). The owner
  * registers storage for the largest canvas before running frames; sokol's
@@ -350,6 +361,42 @@ static void render_scanline(int y, uint32_t *fb, bool use_shadow)
             }
             return;
         }
+
+        if (g_mister_fast_video)
+        {
+            const int copy_w = W < 384 ? W : 384;
+            const int src_x0 = W > 384 ? (W - 384) / 2 : 0;
+            const int dst_x0 = W < 384 ? (384 - W) / 2 : 0;
+
+            if (base == 0 && !p->fill_fn[1] && !p->fill_fn[2] &&
+                !p->sprite_fn[0] && !p->sprite_fn[1] && !p->sprite_fn[2])
+            {
+                for (int dst_y = y_start; dst_y < y_end; dst_y++)
+                {
+                    uint16_t *dst_row = local_fb + dst_y * 384;
+                    if (copy_w < 384)
+                        memset(dst_row, 0, 384 * 2);
+                    const uint16_t *src_row = &planes[0][src_x0];
+                    for (int x = 0; x < copy_w; x++)
+                        dst_row[dst_x0 + x] = g_lut_rgb565[src_row[x]];
+                }
+                return;
+            }
+
+            uint16_t temp_row[VGA_MAX_WIDTH];
+            for (int x = 0; x < W; x++)
+                temp_row[x] = g_lut_rgb565[vga_compose_px(planes, filled, base, x)];
+
+            for (int dst_y = y_start; dst_y < y_end; dst_y++)
+            {
+                uint16_t *dst_row = local_fb + dst_y * 384;
+                if (copy_w < 384)
+                    memset(dst_row, 0, 384 * 2);
+                memcpy(&dst_row[dst_x0], &temp_row[src_x0], (size_t)copy_w * sizeof(uint16_t));
+            }
+            return;
+        }
+
         // Fast path: one opaque filled plane, no overlay/sprite compositing.
         if (base == 0 && !p->fill_fn[1] && !p->fill_fn[2] &&
             !p->sprite_fn[0] && !p->sprite_fn[1] && !p->sprite_fn[2])
