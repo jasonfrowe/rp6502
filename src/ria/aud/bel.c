@@ -187,6 +187,11 @@ static inline uint32_t bel_decay_release_rate(uint8_t nibble, uint32_t rate)
     return (1 << 24) / (rate / 1000 * bel_decay_release_ms_table[nibble]);
 }
 
+bool bel_active(void)
+{
+    return bel_state.active;
+}
+
 #pragma GCC push_options
 #pragma GCC optimize("O3")
 int16_t

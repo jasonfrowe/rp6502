@@ -141,9 +141,12 @@ static void
     int16_t min_val = -(1 << (AUD_PWM_BITS - 1));
     sample_l <<= (AUD_PWM_BITS - 8);
     sample_r <<= (AUD_PWM_BITS - 8);
-    int16_t bel_mix = bel_sample(PSG_RATE);
-    sample_l += bel_mix;
-    sample_r += bel_mix;
+    if (__builtin_expect(bel_active(), 0))
+    {
+        int16_t bel_mix = bel_sample(PSG_RATE);
+        sample_l += bel_mix;
+        sample_r += bel_mix;
+    }
     if (sample_l < min_val)
         sample_l = min_val;
     if (sample_l > max_val)
@@ -248,9 +251,9 @@ static void
         uint8_t val = xram_queue[tail][1];
         uint16_t xaddr = (psg_xaddr & 0xFF00) + loc;
         uint16_t offset = xaddr - psg_xaddr;
-        if ((offset % sizeof(struct psg_channel)) == offsetof(struct psg_channel, pan_gate))
+        if ((offset & 7) == offsetof(struct psg_channel, pan_gate))
         {
-            unsigned i = offset / sizeof(struct psg_channel);
+            unsigned i = offset >> 3;
             if (i < PSG_CHANNELS)
             {
                 if (!(val & 0x01) && psg_channel_state[i].adsr != release)

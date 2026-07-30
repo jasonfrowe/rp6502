@@ -171,12 +171,12 @@ void main_init(void)
 #if defined(MISTER)
     mister_apply_cpu_clock();
 #endif
-    init_scanline_deadlines();
-    pro_init();
-    cpu_init(); /* default PHI2 (--phi2 reapplies after main_init) */
     master_8 = 0;
     scanline_n = 0;
     s_frame_count = 0;
+    init_scanline_deadlines();
+    pro_init();
+    cpu_init(); /* default PHI2 (--phi2 reapplies after main_init) */
     aud_init();
     ria_reset();
     com_reset();        /* cold boot: flush queued input (per-exec keeps type-ahead) */
@@ -192,7 +192,7 @@ void main_init(void)
 
 static void init_scanline_deadlines(void)
 {
-    scanline_deadline_target_8 = 0;
+    scanline_deadline_target_8 = master_8;
     scanline_deadline_rem = 0;
     advance_scanline_deadline(); /* target for scanline_n + 1 when scanline_n == 0 */
 }
@@ -243,9 +243,18 @@ static bool run_until(uint64_t deadline_8, bool dbg)
         if (__builtin_expect(cpu_active(), 1))
         {
             uint64_t delta_8 = deadline_8 - clock_8;
-            int32_t cycles = (int32_t)(delta_8 <= 0xFFFFFFFFull
-                                           ? ((uint32_t)delta_8 / step_8)
-                                           : (delta_8 / step_8));
+            int32_t cycles;
+            if (__builtin_expect(step_8 == 256, 1))
+                cycles = (int32_t)((delta_8 >> 8) > 0x7FFFFFFFull ? 0x7FFFFFFF : (delta_8 >> 8));
+            else if (step_8 == 512)
+                cycles = (int32_t)((delta_8 >> 9) > 0x7FFFFFFFull ? 0x7FFFFFFF : (delta_8 >> 9));
+            else if (step_8 == 1024)
+                cycles = (int32_t)((delta_8 >> 10) > 0x7FFFFFFFull ? 0x7FFFFFFF : (delta_8 >> 10));
+            else
+            {
+                uint64_t q = delta_8 / step_8;
+                cycles = (int32_t)(q > 0x7FFFFFFFull ? 0x7FFFFFFF : q);
+            }
             if (cycles > 0)
             {
                 for (int32_t i = 0; i < cycles; i++)

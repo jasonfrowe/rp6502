@@ -85,7 +85,7 @@ static inline uint64_t cpu_tick_fast(void)
     {
         if ((uint32_t)pins & (uint32_t)M6502_RW)
         {
-            pins = (pins & 0xFFFFFFFFFF00FFFFull) | (((uint64_t)ram[addr]) << 16);
+            pins = (pins & ~0x00FF0000ull) | (((uint64_t)ram[addr]) << 16);
         }
         else
         {
@@ -95,7 +95,8 @@ static inline uint64_t cpu_tick_fast(void)
     return pins;
 }
 
-uint32_t cpu_step_8(void); /* 1/8-tick units advanced per 6502 cycle */
+extern uint32_t master_per_cycle_8;
+static inline uint32_t cpu_step_8(void) { return master_per_cycle_8; }
 
 /* True on an opcode fetch (SYNC); out-writes the fetch PC and SP. */
 bool cpu_opcode_fetch(uint64_t pins, uint16_t *pc, uint8_t *sp);

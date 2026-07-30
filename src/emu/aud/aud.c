@@ -67,12 +67,16 @@ void pwm_set_chan_level(unsigned slice, unsigned chan, uint16_t level)
 #define AUD_RING_FRAMES 4096
 static float g_ring[AUD_RING_FRAMES * 2];
 static unsigned g_head, g_tail; /* frame indices, mod AUD_RING_FRAMES */
+_Static_assert((AUD_RING_FRAMES & (AUD_RING_FRAMES - 1)) == 0,
+               "AUD_RING_FRAMES must be a power of two");
 
 /* Rolling mono downmix of everything pushed to the ring, for waveform display;
  * the reader plots the buffer directly against the write position. */
 #define AUD_VIZ_SAMPLES 4096
 static float g_viz[AUD_VIZ_SAMPLES];
 static int g_viz_pos;
+_Static_assert((AUD_VIZ_SAMPLES & (AUD_VIZ_SAMPLES - 1)) == 0,
+               "AUD_VIZ_SAMPLES must be a power of two");
 
 /* Fractional sample carry so a rate that isn't a multiple of 60 (OPL's 49716)
  * stays pitch-accurate: each frame is owed rate/60 samples on average. */
@@ -80,14 +84,16 @@ static uint32_t g_sample_acc;
 
 static void ring_push(float l, float r)
 {
-    unsigned next = (g_head + 1) % AUD_RING_FRAMES;
+    unsigned next = (g_head + 1) & (AUD_RING_FRAMES - 1);
     if (next == g_tail) /* full: drop the oldest frame */
-        g_tail = (g_tail + 1) % AUD_RING_FRAMES;
+        g_tail = (g_tail + 1) & (AUD_RING_FRAMES - 1);
     g_ring[g_head * 2 + 0] = l;
     g_ring[g_head * 2 + 1] = r;
     g_head = next;
+#if !defined(MISTER)
     g_viz[g_viz_pos] = (l + r) * 0.5f;
-    g_viz_pos = (g_viz_pos + 1) % AUD_VIZ_SAMPLES;
+    g_viz_pos = (g_viz_pos + 1) & (AUD_VIZ_SAMPLES - 1);
+#endif
 }
 
 /* --mute: when off, the synth never runs (no per-sample CPU work) and the
@@ -137,7 +143,7 @@ int aud_read(float *dst, int max_frames)
     {
         dst[got * 2 + 0] = g_ring[g_tail * 2 + 0];
         dst[got * 2 + 1] = g_ring[g_tail * 2 + 1];
-        g_tail = (g_tail + 1) % AUD_RING_FRAMES;
+        g_tail = (g_tail + 1) & (AUD_RING_FRAMES - 1);
         got++;
     }
     return got;

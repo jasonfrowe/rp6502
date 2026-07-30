@@ -29,7 +29,7 @@ void *cpu_chip(void) { return &cpu; }
 /* ------------------------------------------------------------------ */
 
 static uint16_t phi2_khz_run;             /* achievable PHI2 after quantization (reported) */
-static uint32_t master_per_cycle_8 = 256; /* 1/8-ticks advanced per 6502 cycle */
+uint32_t master_per_cycle_8 = 256; /* 1/8-ticks advanced per 6502 cycle */
 
 /* Mirror ria/sys/cpu.c cpu_change_phi2_khz: the 6502:RP2350 ratio is 1:32, so
  * clkdiv = (256MHz/32)/phi2 = 8000/phi2 as int + 8-bit frac. The master clock
@@ -71,8 +71,6 @@ void cpu_reset(void)
 {
     pins = m6502_init(&cpu, &(m6502_desc_t){0});
 }
-
-uint32_t cpu_step_8(void) { return master_per_cycle_8; }
 
 bool cpu_opcode_fetch(uint64_t pins, uint16_t *pc, uint8_t *sp)
 {

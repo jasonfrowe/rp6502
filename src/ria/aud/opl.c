@@ -35,7 +35,8 @@ static inline int16_t opl_mix_sample(void)
     int16_t next;
     OPL_calc_buffer(opl_emu8950, &next, 1);
     int16_t s = (int16_t)(next >> (16 - AUD_PWM_BITS - 2));
-    s = (int16_t)(s + bel_sample(OPL_SAMPLE_RATE));
+    if (__builtin_expect(bel_active(), 0))
+        s = (int16_t)(s + bel_sample(OPL_SAMPLE_RATE));
     int16_t max_val = (1 << (AUD_PWM_BITS - 1)) - 1;
     int16_t min_val = -(1 << (AUD_PWM_BITS - 1));
     if (s < min_val)
@@ -76,7 +77,8 @@ static void
     const int boost_bits = 2;
     opl_sample = next >> (16 - AUD_PWM_BITS - boost_bits);
     // Mix in bel
-    opl_sample += bel_sample(OPL_SAMPLE_RATE);
+    if (__builtin_expect(bel_active(), 0))
+        opl_sample += bel_sample(OPL_SAMPLE_RATE);
     int16_t max_val = (1 << (AUD_PWM_BITS - 1)) - 1;
     int16_t min_val = -(1 << (AUD_PWM_BITS - 1));
     if (opl_sample < min_val)

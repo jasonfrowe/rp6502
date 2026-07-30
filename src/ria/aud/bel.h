@@ -39,6 +39,9 @@ void bel_setup(void);
 // Called from IRQ context (BEL, PSG, or OPL handler).
 int16_t bel_sample(uint32_t rate);
 
+// Returns true if bell audio is actively rendering.
+bool bel_active(void);
+
 // Queue a sound to play.
 void bel_add(const ria_bel_t *sound);
 

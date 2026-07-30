@@ -751,6 +751,10 @@ int window_run(uint32_t *fb, double scale, bool have_scale, bool vsync, bool exi
         {
             total_frame_late_ns += (now_ns - next_frame_time_ns);
             total_frame_late_count++;
+            if (now_ns > next_frame_time_ns + frame_duration_ns * 2)
+            {
+                next_frame_time_ns = now_ns;
+            }
         }
         os_sleep_until_ns(next_frame_time_ns);
     }

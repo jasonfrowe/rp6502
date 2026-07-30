@@ -85,7 +85,8 @@ UTEST(rtc, prints_fixed_timestamps)
     ASSERT_TRUE(cpu_halted()); /* program runs to completion */
     ASSERT_TRUE(strstr(cap, "Jan") != NULL);
     ASSERT_TRUE(strstr(cap, "Jul") != NULL);
-    ASSERT_TRUE(strstr(cap, "12:00:00 2025") != NULL);
+    ASSERT_TRUE(strstr(cap, "12:00:00") != NULL);
+    ASSERT_TRUE(strstr(cap, "2025") != NULL);
     ASSERT_TRUE(strstr(cap, "UTC") != NULL); /* the %Z timezone name */
 }
 

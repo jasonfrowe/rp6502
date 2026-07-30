@@ -279,7 +279,7 @@ void post(std::function<void()> fn)
     g_queue.push_back(std::move(fn));
 }
 
-m6502_t *cpu() { return (m6502_t *)cpu_chip(); }
+m6502_t *dap_cpu() { return (m6502_t *)cpu_chip(); }
 
 const char *reason_str(int r)
 {
@@ -490,7 +490,7 @@ bool stack_return_target(uint16_t pushed, uint16_t *target_out)
 constexpr int UNWIND_SCAN_MAX = 16; /* bytes of register saves to step over */
 void unwind_stack()
 {
-    uint8_t sp = m6502_s(cpu());
+    uint8_t sp = m6502_s(dap_cpu());
     for (int depth = 0; depth < 64; depth++)
     {
         bool found = false;
@@ -1159,7 +1159,7 @@ struct Eval
     EvalResult reg()
     {
         std::string nm = ident();
-        m6502_t *c = cpu();
+        m6502_t *c = dap_cpu();
         if (nm == "A") return ev_rvalue(m6502_a(c));
         if (nm == "X") return ev_rvalue(m6502_x(c));
         if (nm == "Y") return ev_rvalue(m6502_y(c));
@@ -1676,7 +1676,7 @@ extern "C" void dap_start(void)
         if (ref == 1)
         {
             /* Registers. */
-            m6502_t *c = cpu();
+            m6502_t *c = dap_cpu();
             auto add = [&](const char *nm, unsigned val, int width) {
                 dap::Variable v;
                 v.name = nm;
@@ -1959,7 +1959,7 @@ extern "C" void dap_start(void)
             dap::SetVariableResponse r;
             if (ref == 1) /* Registers */
             {
-                m6502_t *c = cpu();
+                m6502_t *c = dap_cpu();
                 const std::string &nm = req.name;
                 if (nm == "A") m6502_set_a(c, (uint8_t)val);
                 else if (nm == "X") m6502_set_x(c, (uint8_t)val);
@@ -2208,7 +2208,7 @@ extern "C" void dap_pump(void)
         else if (g_stop_on_exit)
         {
             g_stop_gen++; /* a new client-visible stop: stale last stop's var refs */
-            dbg_note_stop(m6502_pc(cpu())); /* present halt as a stop */
+            dbg_note_stop(m6502_pc(dap_cpu())); /* present halt as a stop */
             dap::StoppedEvent ev;
             ev.reason = "exited";
             ev.description = "Program exited (code " + std::to_string(main_exit_code()) +
